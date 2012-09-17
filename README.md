@@ -35,7 +35,11 @@ Dependencies
 ------------
 
 * All sorts of perl modules
+* alsa/aplay
 * Cepstral text to speech engine (http://www.cepstral.com/)
+    * default configuration is Diane/Lawrence voices
+* sox
+* metaflac
 
 Applicability
 -------------
