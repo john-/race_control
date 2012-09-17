@@ -840,7 +840,7 @@ sub create_schedule_frame {
     my %controls;
 
     my $font = $heap->{config}{scheduler}{font};
-    my $schedule = $heap->{config}{scheduler}{schedule};
+    my $schedule = $Bin.'/'.$heap->{config}{scheduler}{schedule};
 
 
     my %opts = (
@@ -867,10 +867,16 @@ sub create_schedule_frame {
 	Logger->log("About to create schedule file $file");
 	#my $now = time;
 	#utime $now, $now, $file;
-        open(F, ">$file") && close F;
+	
+        if ( open(F, ">$file") ) {
+	    close F;
+            $controls{schedule_box}->Load($file);
+            $controls{schedule_box}->editModified(0);
+        } else {
+            Logger->log( {level   => 'error', 
+			  message => "Error opening schedule $file $!"} );
+        }
     }
-    $controls{schedule_box}->Load($file);
-    $controls{schedule_box}->editModified(0);
 }
 
 sub create_record_frame {
