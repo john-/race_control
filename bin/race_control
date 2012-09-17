@@ -1,0 +1,2389 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use FindBin qw($Bin);
+use lib "$Bin/../lib";
+
+use Tk;
+#sub POE::Kernel::TRACE_DEFAULT  () { 1 }
+use POE;
+
+use POE::Component::RaceControl::Session;
+use POE::Component::RaceControl::Counter;
+use POE::Component::RaceControl::Announcers;
+use POE::Component::RaceControl::InfoGatherer;
+use POE::Component::RaceControl::Radio;
+use POE::Component::RaceControl::Recorder;
+
+use POE::Component::Logger;
+use POE::Component::IKC::Server;
+
+use Tk::JComboBox;
+use Tk::TextUndo;
+require Tk::HList;
+require Tk::Dialog;
+
+use Switch 'Perl6';
+
+use DateTime;
+
+use Tie::IxHash;
+
+use Config::General;
+
+#use Session;
+#use Announcer;
+
+use Data::Dumper;
+
+POE::Session->create 
+          (inline_states =>
+	   {
+            _start => \&start,
+
+	    create_leader_frame => \&create_leader_frame,
+	    create_scope_frame => \&create_scope_frame,
+	    create_counter_frame => \&create_counter_frame,
+	    create_schedule_frame => \&create_schedule_frame,
+	    create_control_frame => \&create_control_frame,
+	    create_record_frame => \&create_record_frame,
+
+	    car_info => \&car_info,
+	    change_series => \&change_series,
+	    car_change => \&car_change,
+	    postion_not_interesting => \&postion_not_interesting,
+	    flag_change => \&flag_change,
+	    ctrl_msg_change => \&msg_change,
+	    race_msg_change => \&msg_change,
+	    time_msg_change => \&msg_change,
+	    remaining_msg_change => \&msg_change,
+	    event_msg_change => \&event_change,
+	    status_msg => \&msg_change,
+	    refresh_rate => \&refresh_rate,
+	    vocality => \&vocality,
+	    reset_session => \&reset_session,
+#	    change_proxy => \&change_proxy,
+            object_passing_test => \&object_passing_test,
+#	    radio_command => \&radio_command,
+            write_bank => \&write_bank,
+#	    frequency_lock => \&frequency_lock,  # event from Radio
+	    datum_clicked => \&datum_clicked,
+	    edit_car_freq => \&edit_car_freq,
+	    change_channel => \&change_channel,
+            toggle_radio_sink => \&toggle_radio_sink,
+	    # from radio
+	    scanning => \&scanning,
+	    searching => \&scanning,
+	    scoping => \&scanning,
+	    tune => \&tune,
+	    scope_datum => \&scope_datum,
+	    update_log => \&update_log,
+	    session_update => \&session_update,
+	    weather_update => \&weather_update,
+	    set_window => \&set_window,
+
+	    recording_active => \&recording_active,
+	    recording_processing => \&recording_processing,
+	    recording_finalizing => \&recording_finalizing,
+	    recording_idle   => \&recording_idle,
+	    recording_error   => \&recording_error,
+
+	    ikc_server_init   => \&_ikc_server_init,
+
+	    counter_update => \&counter_update,
+            counter_show_detail => \&counter_show_detail,
+
+	    schedule_check => \&schedule_check,
+	   }
+	  );
+
+sub start {
+    my ($kernel, $heap, $session) = @_[ KERNEL, HEAP, SESSION ];
+
+    print "race_gui started\n";
+
+    $kernel->alias_set( 'ui' );
+
+    my $config_file = "$Bin/../config/race_control.conf";
+    unless (-e $config_file) {
+	die "There is no $config_file";
+    }
+    my $conf = new Config::General( -ConfigFile => $config_file,
+                                    -Tie => 'Tie::IxHash');
+    $heap->{config} = { $conf->getall };
+
+    POE::Component::Logger->spawn(ConfigFile => $Bin.'/'.$heap->{config}{race_gui}{log_config});
+    $POE::Component::Logger::DefaultLevel = 'debug';
+
+
+    POE::Component::Session->spawn( Alias => 'session', Config => $heap->{config});
+    POE::Component::Announcers->spawn( Alias => 'booth', Config => $heap->{config});
+    POE::Component::InfoGatherer->spawn( Alias => 'infogatherer', Config => $heap->{config});
+    $heap->{radio1} = POE::Component::Radio->new( Alias => 'radio1', Config => $heap->{config} );
+    $heap->{radio2} = POE::Component::Radio->new( Alias => 'radio2', Config => $heap->{config} );
+    $heap->{counter} = POE::Component::Counter->new( Config => $heap->{config});
+    POE::Component::Recorder->spawn( Alias => 'recorder', Config => $heap->{config});
+
+
+    my $other_font = $heap->{config}{race_gui}{scan_control_font};
+    my $small_font = $heap->{config}{race_gui}{status_bar_font};
+
+    $poe_main_window->minsize( qw(1020 690) );
+    $poe_main_window->maxsize( qw(1020 690) );
+    $poe_main_window->title('Race Thing');
+    $poe_main_window->configure( -background => 'lightgrey' );
+    my $menu_bar = $poe_main_window->Frame()->pack( -side => 'top', -fill => 'x' );
+
+    # menu bar
+    # ---------
+    #
+    # leader board or leader graphic
+    #
+    # ---------
+    # status / control line
+    # scanner control 1 | scanner control 2
+
+
+    #
+    # menu bar
+    #
+
+    # File
+
+    my $file_mb = $menu_bar->Menubutton( -text => 'File',
+                             )->pack( -side => 'left');
+
+    $file_mb->command( -label => 'Exit',
+         -command => sub { $poe_main_window->destroy });
+    $file_mb->command( -label => 'Quiet',
+         -command => $session->postback('vocality' => 'quiet' ));
+    $file_mb->command( -label => 'Talk',
+         -command => $session->postback('vocality' => 'talk' ));
+    $file_mb->command( -label => 'Reset',
+         -command => $session->postback('reset_session' => 'reset_session' ));
+#    $file_mb->command( -label => 'Auto',
+ #        -command => $session->postback('reset_session' => 'reset_session' ));
+
+    # Rate
+
+    $file_mb = $menu_bar->Menubutton( -text => 'Rate',
+                             )->pack( -side => 'left');
+
+    foreach ( (0, 1, 2, 3, 4, 5, 10, 15, 20, 30, 40) ) {
+         $file_mb->command( -label => $_,
+             -command => $session->postback('refresh_rate' => $_ ));
+     }
+
+    # Proxy
+
+#    $file_mb = $menu_bar->Menubutton( -text => 'Proxy',
+#                             )->pack( -side => 'left');
+
+#    $file_mb->command( -label => 'None',
+#         -command => $session->postback('change_proxy' => '' ));
+#    $file_mb->command( -label => 'Localhost',
+#         -command => $session->postback('change_proxy' => 'http://localhost:3129' ));
+
+    # Radio1
+
+#    $file_mb = $menu_bar->Menubutton( -text => 'Radio1',
+#                             )->pack( -side => 'left');
+#    $file_mb->command( -label => 'scan mode',
+#         -command => sub {$heap->{mode}{radio1} = 'scan' } );
+#    $file_mb->command( -label => 'search mode',
+#         -command => sub {$heap->{mode}{radio1} = 'search' } );
+#    $file_mb->command( -label => 'set freq 654.765',
+#         -command => $session->postback('radio_command' => 'radio1' => 'set_freq' => '654765' ));
+#    $file_mb->command( -label => 'Write banks to radio...',
+#         -command => $session->postback( 'bank_writer' => 'radio1' ) );
+#    $file_mb->command( -label => 'Control...',
+#         -command => $session->postback( 'radio_control' => 'radio1' ) );
+
+
+    # Radios
+
+    $file_mb = $menu_bar->Menubutton( -text => 'Radios',
+                             )->pack( -side => 'left');
+#    $file_mb->command( -label => 'scan mode',
+#         -command => sub {$heap->{mode}{radio2} = 'scan' } );
+#    $file_mb->command( -label => 'search mode',
+#         -command => sub {$heap->{mode}{radio2} = 'search' } );
+#    $file_mb->command( -label => 'set freq 654.765',
+#         -command => $session->postback('radio_command' => 'radio2' => 'set_freq' => '654765' ));
+    my %modes = (
+	scan => 'SCN',
+	search => 'SRC',
+	scope => 'SCP'
+    );
+    foreach my $radio ( ('radio1', 'radio2') ) {
+	foreach my $mode ( keys %modes ) {
+            $file_mb->command( -label => "$radio $mode",
+                -command => sub {$heap->{mode}{$radio} = $mode;
+                                 $heap->{modelabel}{$radio} = $modes{$mode} } );
+	    
+
+	}
+
+
+    }
+
+
+    my %misc_opts =  (
+		        -font => $small_font,
+   		        -borderwidth  => 1,
+		        -height => 1,
+		        -background => 'LightBlue',
+
+		      );
+
+
+    # For ease, the frames that'll appear and disappear will both be inside of a
+    # "wrapper" frame, which will contain only ONE of the two frames.
+
+    my $wrapper = $poe_main_window->Frame->pack (-fill => 'both', -expand => 1);
+
+    # create the frames.   Only pack one of them
+
+    #
+    # Leader board
+    #
+
+    $heap->{frames}{leader} = $wrapper->Frame->pack(
+	                                           -side => 'top',
+                                                   -fill => 'both',
+	                                           -expand => 0 );
+
+    $kernel->call( 'ui', 'create_leader_frame' );
+
+    #
+    # Scope frame
+    #
+
+    $heap->{frames}{scope} = $wrapper->Frame();
+
+    $kernel->call( 'ui', 'create_scope_frame' );
+
+    #
+    # Counter frame
+    #
+
+    $heap->{frames}{counter} = $wrapper->Frame();
+
+    $kernel->call( 'ui', 'create_counter_frame' );
+
+    #
+    # Schedule frame
+    # 
+
+    $heap->{frames}{schedule} = $wrapper->Frame();
+
+    $kernel->call( 'ui', 'create_schedule_frame' );
+
+    #
+    # Control frame
+    # 
+
+    $heap->{frames}{control} = $wrapper->Frame();
+
+    $kernel->call( 'ui', 'create_control_frame' );
+
+    #
+    # Record frame
+    # 
+
+    $heap->{frames}{record} = $wrapper->Frame();
+
+    $kernel->call( 'ui', 'create_record_frame' );
+
+
+    # now do some common stuff
+
+    #
+    # Status / Control
+    #
+
+    my $status_control = $poe_main_window->Frame();
+
+    my @series_list = ( 'Off', 'Auto' );
+    push @series_list,  $kernel->call( 'session', 'get_series_list' );
+
+    $heap->{series_box} = $status_control->JComboBox(-choices => \@series_list,
+                                       -font => $other_font,
+				       -entrywidth => 8,
+				       -listwidth => 10,
+				       -textvariable => \$heap->{series},
+#				       -selectcommand => \&change_mode)->pack( -side => 'left');
+				       -selectcommand => $session->postback('change_series'))->pack( -side => 'left' );
+    $heap->{series_box}->setSelectedIndex( 0 );
+
+
+    $heap->{flag_box} = $status_control->Label( 
+					-font => $other_font,
+					-width => 10,
+#					-height => 2,
+					-borderwidth => 0,
+				      )->pack( -side => 'left');
+
+    $heap->{status_box} = $status_control->Label( 
+					-font => $other_font,
+#					-height => 2,
+					-width => 30,  # was 33
+					-borderwidth => 0,
+					-anchor => 'w',
+				      )->pack( -side => 'left');
+
+
+    #$kernel->yield('set_window', 'leader');
+
+    # And a button to swap the frames.
+    #my $switch = 0;
+
+    $heap->{current_window} = 'leader';   # default window on startup
+    my $btn = $status_control->Button (
+	-text => 'S',
+	-width => 3,
+	-borderwidth => 0,
+        -font => $other_font,
+	-command => sub {
+	        $kernel->post('ui', 'set_window', 'next');
+	    }
+	)->pack (-side => 'right');
+
+
+#    my $leader_frame = $wrapper->Frame->pack(
+#	                                           -side => 'top',
+#                                                   -fill => 'x',
+#	                                           -expand => 'x' );
+
+
+    #
+    # scanner interface (1 and 2)
+    #
+
+    my $scan_frame = $poe_main_window->Frame();
+
+    
+    my $scan1_int = $scan_frame->Frame->pack( -side => 'left',
+                                                  -fill => 'x',
+	                                          -expand => 1);
+
+    my $scan2_int = $scan_frame->Frame->pack( -side => 'right',
+                                                  -fill => 'x',
+	                                          -expand => 1);
+
+
+
+    #my $pos_l = $leader_board->Frame()->pack( -side => 'left',
+    #                                -fill => 'y' );
+    #my $cars_l = $leader_board->Frame()->pack( -side => 'left',
+    #                                -fill => 'y' );
+    #my $pos_r = $leader_board->Frame()->pack( -side => 'left',
+    #                                -fill => 'y' );
+
+    #my $cars_r = $leader_board->Frame()->pack( -side => 'left',
+    #                                -fill => 'y' );
+
+
+
+    my @speed_choices;
+
+
+    # scanner 1
+
+    my $pass_btn = $scan1_int->Button( %misc_opts, -text => 'P',
+                                   -command => sub {$heap->{radio1}->pass} )->pack( -side => 'left' );
+
+    my $scan_btn = $scan1_int->Button( %misc_opts, 
+                                    #-text => 'SCN',
+				   -textvariable => \$heap->{modelabel}{radio1},
+				    -command => sub { 
+					 $kernel->post( 'radio1' => 
+                                                       $heap->{mode}{radio1} );
+
+ 				         #my $cmd = $heap->{mode}{radio1};
+				         #$heap->{radio1}->$cmd;
+                                    },
+                                  )->pack( -side => 'left' );
+    my $hold_btn = $scan1_int->Button( %misc_opts, 
+				      -text => 'HLD',
+                                      -command => sub {$heap->{radio1}->hold}
+                                   )->pack( -side => 'left' );
+    my $chan_sel1 = $scan1_int->JComboBox( %misc_opts, -width => 15 , 
+                                       -choices => \@speed_choices ,
+				       -entrywidth => 15,
+				       -maxrows => 30,
+                                       -selectcommand => $session->postback('change_channel' => 'radio1' ) )->pack( -side => 'left', -expand => 1, -fill => 'both' );
+
+
+    # scanner 2
+
+
+    $pass_btn = $scan2_int->Button( %misc_opts, -text => 'P',
+                                   -command => sub {$heap->{radio2}->pass} )->pack( -side => 'left' );
+
+    $scan_btn = $scan2_int->Button( %misc_opts, 
+				   -textvariable => \$heap->{modelabel}{radio2},
+				    -command => sub { 
+					 $kernel->post( 'radio2' => 
+                                                       $heap->{mode}{radio2} );
+                                        },
+#				    -command => sub {$heap->{radio1}->scan}
+                                  )->pack( -side => 'left' );
+    $hold_btn = $scan2_int->Button( %misc_opts, 
+                                    -text => 'HLD',
+                                    -command => sub {$heap->{radio2}->hold}
+                                   )->pack( -side => 'left' );
+    my $chan_sel2 = $scan2_int->JComboBox( %misc_opts, -width => 15 , 
+                                       -choices => \@speed_choices ,
+				       -entrywidth => 15,
+				       -maxrows => 30,
+                                       -selectcommand => $session->postback('change_channel' => 'radio2' ) )->pack( -side => 'left', -expand => 1, -fill => 'both' );
+
+
+    # pack some frames
+
+    $scan_frame->pack( -side => 'bottom',
+                       -fill => 'x',
+	               -expand => 0,
+	               -anchor => 's'
+	             );
+
+
+    $status_control->pack( 
+                       -side => 'bottom',
+                       -fill => 'x',
+		       -expand => 0,
+                       -anchor => 's'
+                        );
+
+
+
+
+
+    # populate freq switch list box
+    my $filter = $heap->{config}{race_gui}{freqs};
+    my @speed_list = $heap->{radio1}->get_info_struct($filter);
+
+    if (!@speed_list) { Logger->log('speed_list was not populated as there are no frequencies matching the criteria.  Probably need to see the README in database dir.'); }
+
+    # note: variable text changes based on what the radio spits out.
+    #       radio to generate "scanning", "frequency_lock" events
+    #       that will get reflected in "variable text"
+    push @speed_choices, { -name => 'Scanning...', -value => 'NONE' };
+    push @speed_choices, { -name => 'Searching...', -value => 'NONE' };
+    push @speed_choices, { -name => 'Band Scope...', -value => 'NONE' };
+
+    foreach ( @speed_list) { push @speed_choices, { -name=> $_->{designator}, -value => $_->{frequency} } }
+
+    $heap->{speed_sel}{radio1}     = $chan_sel1;
+    $heap->{speed_sel}{radio2}     = $chan_sel2;
+
+    # http://en.wikipedia.org/wiki/X11_color_names
+    $heap->{colors} = {
+	default => 'White',
+	position_improve => 'Green',
+	position_deprove => 'Red',
+	run => 'White',
+	pit => 'Yellow',
+	ret => 'Grey',
+	fin => 'SpringGreen',	
+	pace_lap => 'Orange',
+	grid => 'NavajoWhite',
+    };
+
+    $heap->{highlight_time} = 15;
+
+    # TODO: Setting defaults should probably done via config.  Telling
+    #       the radios to execute their mode should be done in Radio
+    #       once program connects to the radio.
+    $heap->{mode}{radio1} = 'search'; # default to searching. Use menu to change
+    $heap->{modelabel}{radio1} = 'SRC';
+    $kernel->post( 'radio1', $heap->{mode}{radio1} );
+
+    $heap->{mode}{radio2} = 'scan';  # default to scanning.  Use menu to change
+    $heap->{modelabel}{radio2} = 'SCN';
+    $kernel->post( 'radio2', $heap->{mode}{radio2} );
+
+    $kernel->yield( 'counter_update' );
+
+    $kernel->yield( 'ikc_server_init' );
+
+    $kernel->delay( 'schedule_check' => 15 ); # let things simmer down first
+}
+
+sub create_leader_frame {
+    my ($kernel, $heap, $session) = @_[ KERNEL, HEAP, SESSION ];
+
+    my $frame = $heap->{frames}{leader};
+
+    # add stuff to leader_frame
+
+    # create the columns
+
+    my $leader_board_left = $frame->Frame->pack( -side => 'left',
+                                                   -fill => 'x',
+	                                           -expand => 0 );
+    my $leader_board_right = $frame->Frame->pack( -side => 'right',
+                                                   -fill => 'x',
+                                                   -expand => 0 );
+
+
+
+    my $pos_l = $leader_board_left->Frame()->pack( -side => 'left',
+                                    -fill => 'x' );
+    my $cars_l = $leader_board_left->Frame()->pack( -side => 'left',
+                                    -fill => 'x',
+                                    -expand => 0 );
+    my $pos_r = $leader_board_right->Frame()->pack( -side => 'left',
+                                    -fill => 'x' );
+
+    my $cars_r = $leader_board_right->Frame()->pack( -side => 'left',
+                                    -fill => 'x',
+                                    -expand => 0 );
+
+    my $pos_font = $heap->{config}{race_gui}{pos_font};
+
+
+    my %pos_opts = (
+                              -font => $pos_font,
+	           );
+
+    my %car_opts = (
+	                  -text => '', 
+                          -font => $pos_font,
+		          -background => 'White',
+			  -borderwidth => 0,
+			  -pady => 1,
+                          -relief => 'flat',
+		          -width => 24,
+		          -anchor => 'w',
+	           );
+
+
+    #my @car_btn;
+    for (my $i=1;  $i<=13; $i++) {
+	my $car_btn;
+        $pos_l->Label( %pos_opts, -text => sprintf("%02s", $i) )->pack();
+        $car_btn = $cars_l->Button( %car_opts )->pack();
+        $car_btn->configure( -command => $session->postback('car_info' => $i ) );
+	$car_btn->bind('<ButtonPress-3>',[$session->postback('edit_car_freq' => $i )]);
+        $heap->{positions}[$i] = $car_btn;
+    }
+    for (my $i=14;  $i<=26; $i++) {
+	my $car_btn;
+        $pos_r->Label( %pos_opts, -text => sprintf("%02s", $i) )->pack();
+        $car_btn = $cars_r->Button( %car_opts )->pack();
+        $car_btn->configure( -command => $session->postback('car_info' => $i ) );
+	$car_btn->bind('<ButtonPress-3>',[$session->postback('edit_car_freq' => $i )]);
+        $heap->{positions}[$i] = $car_btn;
+    }
+
+
+
+
+
+}
+
+sub create_scope_frame {
+    my ($kernel, $heap, $session) = @_[ KERNEL, HEAP, SESSION ];
+
+    my $frame = $heap->{frames}{scope};
+
+    # begin freq:        Render buton    step size:      Scope button
+    # end freq:
+
+    # ----------
+    # |              vert scroll
+    # |
+    # |
+    # | horiz scroll
+
+
+
+
+    my $scope_control_frame = $frame->Frame->pack(
+	                                           -side => 'top',
+                                                   #-fill => 'both',
+	                                           -anchor => 'w',
+	                                           -expand => 0 );
+
+    my $scope_render_frame = $frame->Frame->pack(
+	                                           -side => 'bottom',
+                                                   -fill => 'both',
+	                                           -expand => 1 );
+
+    
+    my @freq_list;
+    for ( my $freq=0; $freq <= 3000; $freq=$freq+100 ) {
+        push @freq_list, $freq;
+    }
+
+
+    my $other_font = $heap->{config}{race_gui}{scan_control_font};
+
+    
+    my $minfreq_label = $scope_control_frame->Label( 
+	                                -text => 'Min Freq',
+					-font => $other_font,
+#					-width => 10,
+#					-height => 2,
+					-borderwidth => 0,
+				      )->pack( -side => 'left');
+
+    my $minfreq_box = $scope_control_frame->JComboBox(-choices => \@freq_list,
+                                       -font => $other_font,
+				       -entrywidth => 4,
+				       -listwidth => 10,
+#				       -selectcommand => \&change_mode)->pack( -side => 'left');
+				       #-selectcommand => $session->postback('change_series')
+                      )->pack( -side => 'left' );
+    $minfreq_box->setSelectedIndex( 0 );
+
+
+    my $maxfreq_label = $scope_control_frame->Label( 
+	                                -text => 'Max Freq',
+					-font => $other_font,
+#					-width => 10,
+#					-height => 2,
+					-borderwidth => 0,
+				      )->pack( -side => 'left');
+
+    my $maxfreq_box = $scope_control_frame->JComboBox(-choices => \@freq_list,
+                                       -font => $other_font,
+				       -entrywidth => 4,
+				       -listwidth => 10,
+#				       -selectcommand => \&change_mode)->pack( -side => 'left');
+				       #-selectcommand => $session->postback('change_series')
+                      )->pack( -side => 'left' );
+    $maxfreq_box->setSelectedIndex( 30 );
+
+    my $small_font = $heap->{config}{race_gui}{status_bar_font};
+    my %misc_opts =  (
+		        -font => $small_font,
+   		        -borderwidth  => 1,
+		        -height => 1,
+		        -background => 'LightBlue',
+
+		      );
+
+
+    my $scope_btn = $scope_control_frame->Button( %misc_opts, -text => 'Run',
+                                   -command => sub {
+                                       $kernel->post( 'radio1', 'scope',
+					    {
+						MinFreq => $minfreq_box->getSelectedValue(),
+					        MaxFreq => $maxfreq_box->getSelectedValue()
+                                            } )
+                                     } )->pack( -side => 'left' );
+    my $render_btn = $scope_control_frame->Button(%misc_opts, -text => 'Render',
+                                   -command => sub {
+                                       $kernel->post('radio1', 'get_scope_info',
+					    {
+						MinFreq => $minfreq_box->getSelectedValue(),
+					        MaxFreq => $maxfreq_box->getSelectedValue()
+					    } )
+                                     } )->pack( -side => 'left' );
+
+
+
+
+    #$heap->{scope_canvas} = $scope_render_frame->Canvas( 
+    #	                                         -background => 'white',
+    #	                                        );
+    
+    my $canvas = $scope_render_frame->Scrolled( 'Canvas',
+    	                                         -background => 'white',
+                                                 -scrollbars => 's' 
+    	                                      );
+    $heap->{scope_canvas} = $canvas;
+
+    $canvas->pack(-side => 'bottom',
+    	                -fill => 'both',
+    	                -expand => 1 );
+    
+    #my $height = $canvas->height;
+
+    my $height = $heap->{config}{race_gui}{bandscope}{height};
+    my $spread = $heap->{config}{race_gui}{bandscope}{spread};
+
+    for (my $freq=0; $freq<=3000; $freq++) {
+	my $xpos = $freq*$spread;
+	$canvas->createLine($xpos, 50,
+                            $xpos, $height,
+                            -width => 1);
+	$canvas->createText($xpos, 5, 
+                           -anchor => 'n',
+			   -font => $other_font,
+                           -text => sprintf('%d', $freq));
+
+    }
+
+	#$car_btn->bind('<ButtonPress-3>',[$session->postback('edit_car_freq' => $i )]);
+
+
+    $canvas->configure(-scrollregion => [ 0,0, 3000*$spread, $height ]);
+    $canvas->bind('datum', '<Button-1>', 
+		  [$session->postback('datum_clicked')]);
+}
+
+sub create_counter_frame {
+    my ($kernel, $heap, $session) = @_[ KERNEL, HEAP, SESSION ];
+
+    my $main_font = $heap->{config}{counter}{main_font};
+    my $small_font = $heap->{config}{counter}{small_font};
+    my $other_font = $main_font;
+
+    my $frame = $heap->{frames}{counter};
+    #my $controls = $heap->{counter_controls};
+    my %controls;
+
+    my $freq_frame = $frame->Frame->pack( -side => 'top',
+                                          -fill => 'y',
+					  -expand => 1 );
+
+
+    my $summary = $freq_frame->Scrolled("HList",
+			-header => 1,
+			-font => $main_font,
+			-columns => 3,
+			-scrollbars => 'osoe',
+			-width => 33,
+			-selectbackground => 'SeaGreen3',
+			-selectmode => 'single',
+			-browsecmd => $session->postback('counter_show_detail'),
+		       )->pack(-side => 'left', -expand => 1, -fill => 'both');
+
+    $summary->header('create', 0, -text => 'Cnt');
+    $summary->columnWidth(0, -char, 4);
+    $summary->header('create', 1, -text => 'Freq');
+    $summary->columnWidth(1, -char, 9);
+    $summary->header('create', 2, -text => 'Desc');
+    $summary->columnWidth(2, -char, 25);
+
+    my $right_frame = $freq_frame->Frame->pack( -side => 'right',
+                                                   -fill => 'both',
+						   -expand => 1 );
+
+
+    my $detail = $right_frame->Scrolled("HList",
+			-header => 1,
+			-font => $main_font,
+			-columns => 3,
+			-scrollbars => 'osoe',
+			-width => 15,
+			-selectbackground => 'SeaGreen3',
+		       )->pack(-side => 'top', -expand => 1, -fill => 'both');
+
+    my $btn_frame = $right_frame->Frame->pack( -side => 'bottom',
+                                                   -fill => 'both',
+						   -expand => 0 );
+
+    my %misc_opts =  (
+		        -font => $small_font,
+   		        -borderwidth  => 1,
+		        -height => 1,
+		        -background => 'LightBlue',
+
+		      );
+
+    $controls{auto_btn} = $btn_frame->Button( %misc_opts, 
+                                    -text => 'Auto',
+				    -command => sub {
+					    $controls{mode} = 'auto';
+					    $controls{auto_btn}->configure( -state => 'disabled' );
+					    $controls{manual_btn}->configure( -state => 'normal' );
+					    $controls{disable_btn}->configure( -state => 'normal' );
+					}
+                                  )->pack( -side => 'left' );
+    $controls{manual_btn} = $btn_frame->Button( %misc_opts, 
+                                    -text => 'Manual',
+				    -command => sub { 
+					    $controls{mode} = 'manual';
+					    $controls{auto_btn}->configure( -state => 'normal' );
+					    $controls{manual_btn}->configure( -state => 'disabled' );
+					    $controls{disable_btn}->configure( -state => 'normal' );
+
+					}
+                                  )->pack( -side => 'left' );
+    $controls{disable_btn} = $btn_frame->Button( %misc_opts, 
+                                    -text => 'Disable',
+				    -command => sub {
+					    $controls{mode} = 'disable';
+					    $controls{auto_btn}->configure( -state => 'normal' );
+					    $controls{manual_btn}->configure( -state => 'normal' );
+					    $controls{disable_btn}->configure( -state => 'disabled' );
+				        }
+                                  )->pack( -side => 'left' );
+
+    $detail->header('create', 0, -text => 'Interval');
+#    $detail->header('create', 1, -text => 'Lat');
+#    $detail->header('create', 2, -text => 'Long');
+
+
+    $controls{summary_grid} = $summary;
+    $controls{detail_grid}  = $detail;
+
+    #$heap->{counter_controls}{mode} = 'disable';
+    $controls{mode} = 'disable';
+    $controls{disable_btn}->configure( -state => 'disabled' );
+
+    $heap->{counter_controls} = \%controls;
+}
+
+
+sub create_schedule_frame {
+    my ($kernel, $heap, $session) = @_[ KERNEL, HEAP, SESSION ];
+
+    my $frame = $heap->{frames}{schedule};
+    my %controls;
+
+    my $font = $heap->{config}{scheduler}{font};
+    my $schedule = $heap->{config}{scheduler}{schedule};
+
+
+    my %opts = (
+                              -font => $font,
+	           );
+
+
+    $controls{schedule_box} = $frame->Scrolled( 'TextUndo',
+                                       %opts,
+				       -height => 8,
+                                       #-width => 75,
+	                               -background => 'white');
+    $controls{schedule_box}->pack( -side => 'top', -expand => 1, -fill => 'both' );
+
+    $heap->{schedule_controls} = \%controls;
+
+    my @days = qw(Sun Mon Tue Wed Thu Fri Sat);
+    my $day = $days[(localtime())[6]];
+    Logger->log("Day of week: $day");
+    
+    my $file = "$schedule.$day";
+
+    if (!-e $file) {
+	Logger->log("About to create schedule file $file");
+	#my $now = time;
+	#utime $now, $now, $file;
+        open(F, ">$file") && close F;
+    }
+    $controls{schedule_box}->Load($file);
+    $controls{schedule_box}->editModified(0);
+}
+
+sub create_record_frame {
+    my ($kernel, $heap, $session) = @_[ KERNEL, HEAP, SESSION ];
+
+    my $frame = $heap->{frames}{record};
+    my $series_frame = $frame->Frame->pack( -side => 'top',
+                                                   -fill => 'x',
+						   -expand => 0 );
+    my $event_frame = $frame->Frame->pack( -side => 'top',
+                                                   -fill => 'x',
+						   -expand => 0 );
+    my $corner_frame = $frame->Frame->pack( -side => 'top',
+                                                   -fill => 'x',
+						   -expand => 0 );
+    my $side_frame = $frame->Frame->pack( -side => 'top',
+                                                   -fill => 'x',
+						   -expand => 0 );
+    my $control_frame = $frame->Frame->pack( -side => 'top',
+                                                   -fill => 'x',
+						   -expand => 0 );
+    my $log_frame = $frame->Frame->pack( -side => 'top',
+                                                   -fill => 'x',
+						   -expand => 0 );
+
+
+
+    my %controls;
+
+    my $font = $heap->{config}{scheduler}{font};
+    my $schedule = $heap->{config}{scheduler}{schedule};
+
+
+    my %opts = (
+                              -font => $font,
+	           );
+
+    my @corner_list = ('Corner 1','Corner 2','Corner 3','Corner 4',
+                       'Corner 5',6,7,8,9,10,11,12,13,14,'Pits');
+
+    $controls{corner_label} = $corner_frame->Label( 
+	                                -text => 'Corner',
+					-font => $font,
+#					-width => 10,
+#					-height => 2,
+					-borderwidth => 0,
+				      )->pack( 
+                                               -side=> 'left',
+                                               );
+
+    $controls{corner_box} = $corner_frame->JComboBox(-choices => \@corner_list,
+                                       -font => $font,
+				       -mode => 'editable',
+				       -entrywidth => 20,
+				       #-entrywidth => 4,
+				       #-listwidth => 10,
+                      )->pack( 
+                               -side => 'left',
+                               );
+    $controls{corner_box}->setSelectedIndex( 0 );
+
+
+    my @side_list = ('Inside', 'Outside', 'Straight');
+    $controls{side_label} = $side_frame->Label( 
+	                                -text => 'Side',
+					-font => $font,
+#					-width => 10,
+#					-height => 2,
+					-borderwidth => 0,
+				      )->pack(
+					       -side => 'left',
+                                               );
+
+    $controls{side_box} = $side_frame->JComboBox(-choices => \@side_list,
+                                       -font => $font,
+				       -mode => 'editable',
+				       #-entrywidth => 4,
+				       #-listwidth => 10,
+                      )->pack( -side => 'left',
+			      
+                              );
+    $controls{side_box}->setSelectedIndex( 0 );
+
+
+    my @series_list = ('ALMS', 'SCCA');
+    $controls{series_label} = $series_frame->Label( 
+	                                -text => 'Series',
+					-font => $font,
+#					-width => 10,
+#					-height => 2,
+					-borderwidth => 0,
+				      )->pack(
+					       -side => 'left',
+                                               );
+
+    $controls{series_box} = $series_frame->JComboBox(-choices => \@series_list,
+                                       -font => $font,
+				       -mode => 'editable',
+				       -entrywidth => 10,
+				       #-entrywidth => 4,
+				       #-listwidth => 10,
+                      )->pack( -side => 'left',
+			      
+                              );
+    $controls{series_box}->setSelectedIndex( 0 );
+
+
+
+
+
+    my @event_list = ('Practice', 'Qualifying', 'Race');
+    $controls{event_label} = $event_frame->Label( 
+	                                -text => 'Event',
+					-font => $font,
+#					-width => 10,
+#					-height => 2,
+					-borderwidth => 0,
+				      )->pack(
+					       -side => 'left',
+                                               );
+
+    $controls{event_box} = $event_frame->JComboBox(-choices => \@event_list,
+                                       -font => $font,
+				       -mode => 'editable',
+				       -entrywidth => 30,
+				       #-listwidth => 10,
+                      )->pack( -side => 'left',
+			      
+                              );
+    $controls{event_box}->setSelectedIndex( 0 );
+
+
+
+
+
+
+    $controls{record_btn} = $control_frame->Button( %opts,
+				   
+				   -textvariable => \$heap->{recording_btn_text},
+                                      )->pack(  );
+
+    $kernel->yield('recording_idle', 'Waiting to record');
+    #$controls(record_btn}->bind('<ButtonPress>', \&one);
+
+
+    $controls{log_box} = $log_frame->Scrolled('Text',
+			-font => $font,
+			-scrollbars => 'osoe',
+			-selectbackground => 'SeaGreen3',
+			-height => 7,
+		       )->pack( );
+
+
+
+    $heap->{record_controls} = \%controls;
+
+    my @days = qw(Sun Mon Tue Wed Thu Fri Sat);
+    my $day = $days[(localtime())[6]];
+    Logger->log("Day of week: $day");
+    
+    my $file = "$schedule.$day";
+}
+
+
+sub create_control_frame {
+    my ($kernel, $heap, $session) = @_[ KERNEL, HEAP, SESSION ];
+
+    my $frame = $heap->{frames}{control};
+
+    my $font = $heap->{config}{controller}{font};
+
+    my %opts = (
+                              -font => $font,
+	           );
+
+    my $buttons_frame = $frame->Frame->pack( -side => 'top',
+                                                   -fill => 'x',
+						   -expand => 0 );
+    my $interact_frame = $frame->Frame->pack( -side => 'top',
+                                                   -fill => 'x',
+						   -expand => 0 );
+    my $log_frame = $frame->Frame->pack( -side => 'top',
+                                                   -fill => 'x',
+						   -expand => 1 );
+
+    #
+    # Radio Selector
+    #
+
+
+    my $radio = 'radio1';
+
+    my $radio_radio1 = $buttons_frame->Radiobutton(-text => "radio1", 
+						 -value => "radio1",
+						 -variable => \$radio,
+						 -font => $font,
+						 -command => $session->postback( 'toggle_radio_sink' => 'radio1' )
+                                           )->pack(-side => 'left',
+                                                   -expand => 1,
+						   -anchor => 'e',
+					           );
+    my $radio_radio2 = $buttons_frame->Radiobutton(-text => "radio2",
+						 -value => "radio2",
+						 -variable => \$radio,
+						 -font => $font,
+						 -command => $session->postback( 'toggle_radio_sink' => 'radio2' )
+                                             )->pack(-side => 'left',
+					             -expand => 1,
+						     -anchor => 'w',
+                                                      );
+    #
+    # Interact Frames
+    #
+
+    my $raw_frame = $interact_frame->Frame( 
+	                                    -borderwidth => '2', 
+					    -relief=>'ridge'
+	                                  )->pack(
+	                                            -side => 'left',
+	                                         );
+    my $bank_frame = $interact_frame->Frame(
+	                                     -borderwidth => '2', 
+					     -relief=>'ridge'
+	                                   )->pack(
+	                                            -side => 'left',
+	                                          );
+    my $event_frame = $interact_frame->Frame(
+	                                      -borderwidth => '2', 
+					      -relief=>'ridge'
+	                                    )->pack(
+	                                            -side => 'left',
+	                                            );
+
+
+    #
+    # Raw Writer
+    #
+
+    my $cmd_box = $raw_frame->Entry( %opts, -width => 15);
+
+    my $cmd_btn = $raw_frame->Button( %opts, -text => 'Send',
+        -command => sub { 
+	                  my $cmd = $cmd_box->get();
+                          $heap->{$radio}->raw_cmd( $cmd );
+
+                        }
+                              );
+    
+    my @cmd_choices = ( { -name => 'Sizeof Bank f',  -value => 'MWf' },
+			{ -name => 'Resize Bank f',  -value => 'MWf90' },
+			{ -name => 'Link scan bank f and g',  -value => 'BM fg' },
+			{ -name => 'Clear Bank Linking',  -value => 'BM%%' },
+			{ -name => 'Name Bank n',  -value => 'TBnxxxxxxxx' },	
+			{ -name => 'Delete Bank x',  -value => 'MQx%%' },
+                        { -name => 'LCD Contrast', -value => 'LB' },
+			{ -name => 'set scan bank a to racing (UHF)', -value => 'SEa SL0451.00000 SU0470.00000 AU1 ST025000 MD0 AT0 TTRacingFrqUHF'},
+			{ -name => 'set scan bank a to racing (VHF)', -value => 'SEb SL0150.00000 SU0174.00000 AU1 ST025000 MD0 AT0 TTRacingFrqVHF'},
+			{ -name => 'set search group 1', -value => 'GS1 AS1' },
+			{ -name => 'link search bank a and b', -value => 'BS ab' },
+			{ -name => 'auto store to bank J', -value => 'VT1' },
+			{ -name => 'SetOpening message (48 char max)', -value => 'OM2 ' },
+                       );
+
+    my $cmd_sel = $raw_frame->JComboBox( %opts, 
+                                       -choices => \@cmd_choices ,
+				       -entrywidth => 25,
+#                                       -selectcommand => $session->postback('expand_radio_cmd'),
+					-selectcommand => sub {
+					    my ($self, $item) = @_;
+					    $cmd_box->delete( 0, 'end' );
+					    $cmd_box->insert( 0, $self->getSelectedValue() );
+					}
+
+                                       );
+
+    $cmd_sel->pack( -side => 'top' );
+    $cmd_box->pack( -side => 'left' );
+    $cmd_btn->pack( -side => 'left' );
+
+    #
+    # Bank Writer
+    #
+
+    my $bank_box = $bank_frame->Entry( %opts, -width => 3, -text => 'f' )->pack( -side => 'left');
+    my $label_box = $bank_frame->Entry( %opts, -width => 12, -text => '' )->pack( -side => 'left');
+
+
+    my $speedlist = $heap->{config}{freq_gui}{speedlist};
+    my @query_choices = map {{-name=>$_, -value=>$speedlist->{$_}{filter}}} keys %$speedlist;
+
+    my $query_sel = $bank_frame->JComboBox( %opts, 
+                                       -choices => \@query_choices ,
+				       -entrywidth => 19,
+					-selectcommand => sub {
+					    my ($self, $item) = @_;
+
+					    # default bank letter from config
+					    $bank_box->delete( '0.0', 'end' );
+
+					    my $filter = $self->getItemNameAt($self->getSelectedIndex());
+					    my $bank = $speedlist->{$filter}{bank};
+					    $bank_box->insert( '0.0', $bank );
+
+					    # default bank name
+					    $label_box->delete( '0.0', 'end' );
+					    $filter = $self->getItemNameAt($self->getSelectedIndex());
+					    my $label = $speedlist->{$filter}{label};
+					    $label_box->insert( '0.0', $label );
+					}
+
+                                       );
+    $query_sel->pack( -side => 'top', -before => $bank_box );
+
+
+
+    $bank_frame->Button( -text => 'Send', %opts,
+               -command => sub { 
+		                 if ($kernel->call( $radio, 'connected')) {
+				     my $bank = $bank_box->get;
+				     my $label = $label_box->get;
+				     my $sql = $query_sel->getSelectedValue();
+		                     $heap->{$radio}->write_bank( $sql, $bank, $label );
+		                     Logger->log("wrote bank $bank ($label) to $radio");
+
+                                     #$bank_writer->destroy;
+				 } else {
+     		                     Logger->log("could not write bank to $radio");
+			         }
+
+                               } )->pack( -side => 'bottom' );
+    #
+    # Event Sender
+    #
+
+    my $event_box = $event_frame->Entry( %opts, -width => 15);
+
+    my $event_btn = $event_frame->Button( %opts, -text => 'Send',
+        -command => sub { 
+	                  my $cmd = $event_box->get();
+			  my ($session, $event, $arg) = split /\|/, $cmd;
+			  
+			  Logger->log("about to fire off event $session|$event|$arg");
+			  $kernel->post( $session, $event => $arg);
+                        }
+                              );
+    
+    my @event_choices = ( { -name => 'schedule check', -value => 'ui|schedule_check|' },
+			{ -name => 'radio2 resync', -value => 'radio2|resync_scan_info|' },
+			{ -name => 'blah this', -value => 'session|event|arg' },
+			{ -name => 'radio1 scan', -value => 'radio1|scan|' },
+                       );
+
+    my $event_sel = $event_frame->JComboBox( %opts, 
+                                       -choices => \@event_choices ,
+				       -entrywidth => 25,
+#                                       -selectcommand => $session->postback('expand_radio_cmd'),
+					-selectcommand => sub {
+					    my ($self, $item) = @_;
+					    $event_box->delete( 0, 'end' );
+					    $event_box->insert( 0, $self->getSelectedValue() );
+					}
+
+                                       );
+
+    $event_sel->pack( -side => 'top' );
+    $event_box->pack( -side => 'left' );
+    $event_btn->pack( -side => 'left' );
+    
+    #
+    # Log
+    #
+
+    $heap->{log_window} = $log_frame->TextUndo( %opts, -height => 15,
+	                                        -background => 'white' )->pack(
+	                                           -side => 'top',
+                                                   -fill => 'both',
+						   -expand => 1);
+
+    # leaving log on all the time for now.
+    # TODO: Does it really matter if log is available all the time?
+    $heap->{$radio}->log_sink( 'update_log' );
+}
+
+sub datum_clicked {
+    my ($heap, $kernel) = @_[ HEAP, KERNEL];
+
+    my @tags = $heap->{scope_canvas}->gettags('current');
+    my ($freq, $strength, $time);
+    foreach (@tags) {
+        #Logger->log("tag: $_");
+        if (/f(.+)/) {
+            $freq = $1;
+        } elsif (/s(.+)/) {
+            $strength = $1;
+        } elsif (/t(.+)/) {
+	    $time = $1;
+        }
+    }
+
+    $kernel->yield('status_msg', 
+       	           sprintf('%.2f/%d/%s',
+                   $freq, $strength, $time));
+}
+
+
+sub car_info {
+    my ($heap, $kernel, $postback) = @_[ HEAP, KERNEL, ARG0 ]; # ARG0 contains creation time
+                                              # values ("magic cookies")
+    
+    my $pos = $postback->[0];
+
+    $kernel->post( 'session', 'tell_me_about_car_at_pos' => $pos );
+
+}
+
+sub change_series {
+    my ($heap, $kernel, $callback, $postback) = @_[ HEAP, KERNEL, ARG0, ARG1]; 
+
+    #my $from_session_series = scalar($callback);
+    #Logger->log("current series: $heap->{series}  requested: ".Dumper($callback));
+    if (ref($callback) ne 'ARRAY') {
+	Logger->log("Session (not UI) wants series changed to: $callback");
+	# after the variabletext is set then change_series will
+	# be called again but as an UI event (instead of from the Session)
+	$heap->{series} = $callback;
+	return;
+    }
+    my $series = $postback->[3];
+
+    # reset ui elemenets
+    clear_positions($heap);
+   
+    #Logger->log('About to reset the flag to nothingness');
+    $kernel->yield( 'flag_change' => '');
+    $kernel->yield( 'event_msg_change' => 'No session');
+    
+
+
+
+    $kernel->post( 'session' => 'set_series' => $series );
+
+}
+
+sub scanning {
+    my ($heap, $radio) = @_[ HEAP, ARG0 ];
+
+    my $idx;
+    if ($heap->{mode}{$radio} eq 'scan') {
+	$idx = 0;
+    } elsif ($heap->{mode}{$radio} eq 'search') {
+        $idx = 1;
+    } else {  # Bandscope
+	$idx = 2;
+    }
+
+    $_[HEAP]->{speed_sel}{$radio}->setSelectedIndex( $idx );
+}
+
+
+# scan stopped on a channel or user hit 'hold' button or freq counter
+# told radio to tune to a channel
+sub tune {
+    my ($heap, $radio, $method, $matches, ) = @_[ HEAP, ARG0, ARG1, ARG2 ];
+
+    my $freq = $matches->{frequency};  # only one will ever be returned
+
+    Logger->log(Dumper($matches));
+    Logger->log("$radio tuned to: $freq");
+
+    if ($freq eq 'INVALID') { return }
+
+    my $info;
+    if ($matches->{groups} and $matches->{groups} =~ /car/) {
+	$info = get_car_info( $heap->{cars}, $matches );
+    } else {
+        if ($matches->{designator}) {
+            $info = $matches->{designator};
+        } else {
+            $info = $freq;
+        }
+    }
+
+    my $speed_sel = $heap->{speed_sel}{$radio};
+
+    my $name;
+    if ($method eq 'hold') {
+        $name = 'P:' . $info;
+
+        if ( !$speed_sel->getItemIndex( $name ) ) {
+            $speed_sel->addItem( $name, -value => $freq );
+        }
+    } else { # lock or set
+	my $type;
+	if ($method eq 'lock') { # scan lock
+	    $type = 'L:';
+        } else { # set by freq counter
+	    $type = 'C:'; 
+        }
+	
+	$name = $type . $info;
+
+	my $idx = $speed_sel->getItemIndex( $type, -mode => 'usecase' );
+
+	if ( $idx ) { $speed_sel->removeItemAt( $idx ); }
+
+        $speed_sel->addItem( $name, -value => 'NOOP'.$freq );
+
+	# expect to check if a store radio/bank is defined
+	# if it is, do it
+    }
+    
+    $speed_sel->setSelected( $name );
+    
+}
+
+sub scope_datum {
+    my ($heap, $datum_info ) = @_[ HEAP, ARG0 ];
+
+    my $freq     = $datum_info->{frequency};
+    my $strength = $datum_info->{strength};
+    my $passid   = $datum_info->{passid};
+    my $time     = $datum_info->{time};
+    
+    my $canvas = $heap->{scope_canvas};
+
+    # if datum exists then exit
+    #if ($canvas->find('withtag', sprintf('f%f&&p%d', $freq, $passid))) {
+    #Logger->log('Datum aready in UI');
+    #    return;
+    #}
+
+    my @datums = $canvas->find('withtag', sprintf('f%f', $freq));
+
+    #Logger->log(@datums);
+
+    #my $numdatums = @datums;
+    #if ($numdatums >= 2) { Logger->log('scope_datum'.Dumper(@datums)) }
+
+    my $passtag = sprintf('p%d', $passid);
+
+    foreach (@datums) {
+	#my @tags = $canvas->gettags($_);
+	foreach my $tag (@{$canvas->gettags($_)}) {
+	    if ($passtag eq $tag) {
+	        Logger->log('got a duplicate.  Skipping');
+	        return;
+	    }
+        }
+    }
+    
+
+    my $spread = $heap->{config}{race_gui}{bandscope}{spread};
+
+    my $length = ($canvas->height / 18) * $strength;
+    my $xpos = $freq * $spread;
+
+    #Logger->log("datum- xpos: $xpos length: $length");
+    $canvas->createLine($xpos,
+    			$canvas->height - $length,
+    		        $xpos,
+    			$canvas->height,
+			-tags => [
+                                   'datum',
+                                   sprintf('f%f', $freq),
+                                   sprintf('s%d', $strength),
+			           sprintf('t%s', $time),
+			           sprintf('p%d', $passid)
+                                 ],
+    	                -width => 2);
+}
+
+
+sub change_channel {
+    my ($heap, $postback, $callback) = @_[ HEAP, ARG0, ARG1];  # ARG1 contains 
+                                                       #run-time values from Tk
+
+    my $item = $callback->[1];  # orig 3
+    my $radio = $postback->[0];
+
+    my $freq = $heap->{speed_sel}{$radio}->getItemValueAt($item);
+
+    Logger->log("change_channel freq: $freq on $radio");
+
+    if ($freq =~ /^NOOP(.+)/) {
+
+	# maybe remove NOOP and allow this to be used manually by user.
+	return;
+    }
+
+    if ($freq eq 'NONE' ) { return }
+
+    $heap->{$radio}->set_freq( $freq );
+
+}
+
+sub car_change {
+    my ($heap, $kernel, $car_ref) = @_[ HEAP, KERNEL, ARG0 ];
+
+    my %car = %$car_ref;
+
+    #Logger->log(Dumper(%car));
+
+    # store the car info in parellel(sp) with the positions
+    $heap->{cars}[$car{position}] = \%car;
+
+    update_leader_board($kernel, $heap, $car{position});
+
+    #update_chase_display($kernel, $heap, $car{position});
+
+
+
+#    print "position: $car{position}  driver: $car{driver}\n";
+#    print Dumper(%car);
+
+}
+
+sub update_leader_board {
+    my ($kernel, $heap, $car_pos) = @_;
+
+    if ($car_pos > 26) { return } # gui only handles 26 positions
+
+    if ($car_pos eq 1) { clear_positions($heap) } # this handles when
+                                                        # cars leave session
+
+#    render_car($heap, \%car);
+
+    render_text($heap, $car_pos);
+
+    render_color($kernel, $heap, $car_pos);
+
+    render_effects($kernel, $heap, $car_pos);
+}
+
+sub update_chase_display {
+
+    #
+    #  This is not implemented.  There is issue with handling lapped cars
+    #  in the proposed GUI
+    #
+    my ($kernel, $heap, $car_pos) = @_;
+
+    my %car = %{$heap->{cars}[$car_pos]};
+
+
+    # track each car class type.  Most times it will be one but
+    # ALMS will be more than that
+
+    my $max_in_class = $heap->{config}{race_gui}{chase}{max_in_class};
+
+    if ($car{class_pos} > $max_in_class) { return }
+
+
+
+
+}
+
+sub render_text {
+    my ($heap, $car_pos) = @_;
+
+#    print Dumper($heap);
+    my %car = %{$heap->{cars}[$car_pos]};
+
+    #Logger->log(Dumper(%car));
+
+    tie my %format, "Tie::IxHash";    # not sure yet if this is working
+
+    $format{car} = '%2s ';
+
+    # get first word from model of car if there is a model.
+    if ($car{model}) {
+	if ($car{model} =~ /(\S+) .*/) {$car{model} = $1}
+	$format{model} = '%s/';
+    }
+
+    # if there is a last name use it or else concot one
+    if ($car{last_name}) { 
+	$car{driver} = $car{last_name} 
+    } else {
+        if ($car{driver} =~ /.* (\S+)$/) {$car{driver} = $1}
+    }
+    $format{driver} = '%s';
+
+    if ($car{gap} =~ /^[.\d]+$/) {
+	$format{gap} = '/%0.2f';
+    } else {
+        $format{gap} = '/%s';  # gaps come in number of laps
+    }
+
+
+    if (not $car{status} =~ /Run/) { 
+	$format{status} = '/%s';
+    }
+
+    my $text = '';
+    while ( my ($key, $value) = each %format ) {
+	$text .= sprintf("$value", $car{$key});
+        #Logger->log("text: |$text|  raw: |$car{$key}|");
+    }
+ 
+     $heap->{positions}[$car{position}]->configure(
+	           -text => $text, 
+#		   -background => $color,
+		    	     );
+    
+
+}
+
+sub render_color {
+    my ($kernel, $heap, $car_pos) = @_;
+
+    my %car = %{$heap->{cars}[$car_pos]};
+
+    # this is commented out as with changes to make changes in number of
+    # cars during session forces me to always re-color
+    #if (!@{$car{changes}}) { return }  # car was changed, but nothing that
+                                     # warrents modifying color
+
+    # set fixed color
+
+    if (!defined $heap->{colors}{lc $car{status}}) {
+ 	Logger->log("Status |$car{status}| not defined.  Defaulting color");
+	$car{status} = 'pace_lap';   # make it stand out for debugging
+    }
+
+    my $color = $heap->{colors}{lc $car{status}};
+
+#    print "car_status: $car{status}  color: $color\n";
+    # do color effects
+
+
+
+    $heap->{positions}[$car{position}]->configure(
+		   -background => $color,
+		    	     );
+    
+
+}
+
+sub render_effects {
+    my ($kernel, $heap, $car_pos) = @_;
+
+    my %car = %{$heap->{cars}[$car_pos]};
+
+    foreach (@{$car{changes}}) {
+	if (/position.*/) { 
+            my $color = $heap->{colors}{$_};
+
+            $heap->{positions}[$car{position}]->configure(
+	     	                                -background => $color,
+		    	                        );
+            $kernel->delay_add( 'postion_not_interesting', $heap->{highlight_time}, $car_pos );
+	    last;
+        }
+
+    }
+    
+
+}
+
+sub postion_not_interesting {
+    my ($kernel, $heap, $pos) = @_[ KERNEL, HEAP, ARG0 ];
+
+    render_color($kernel, $heap, $pos);
+
+}
+
+sub flag_change {
+    my ($heap, $flag) = @_[ HEAP, ARG0 ];
+
+    #Logger->log("REMOVE: in flag_change: $flag");
+    my $color = 'lightgrey';
+    given ($flag) {
+	when /Green/ { $color = 'Green' }
+	when /Yellow/ { $color = 'Yellow' }
+        when /Red/ { $color = 'Red' }
+        when /Blue/ { $color = 'Blue' }
+    }
+
+    $heap->{flag_box}->configure(
+			           -text => $flag,
+			           -background => $color,
+				);
+}
+
+sub msg_change {
+    my ($heap, $msg) = @_[ HEAP, ARG0 ];
+
+    $heap->{status_box}->configure(
+			           -text => $msg,
+				   );
+}
+
+sub vocality {
+    my ($kernel, $postback) = @_[ KERNEL, ARG0 ]; # ARG0 contains creation time
+                                              # values ("magic cookies")
+    
+    my $mode = $postback->[0];
+
+    $kernel->post( 'booth' => $mode );
+
+}
+
+sub refresh_rate {
+    my ($kernel, $heap, $postback) = @_[ KERNEL, HEAP, ARG0 ]; # ARG0 contains creation time
+                                              # values ("magic cookies")
+    
+    my $rate = $postback->[0];
+
+    $heap->{highlight_time} = $rate * 0.75;
+
+    $kernel->post( 'session', 'refresh_rate' => $rate );
+
+}
+
+sub clear_positions {
+   my ($heap) = @_;
+
+
+   # can't figure out how to clear backing data without breaking things
+   #$heap->{cars} = undef;
+    
+   for (my $i=1; $i<=26; $i++) {
+
+       $heap->{positions}[$i]->configure( 
+           -text => '',
+	   -background => $heap->{colors}{default}, 
+       );
+   }
+}    
+
+sub reset_session {
+   my ($kernel, $heap) = @_[ KERNEL, HEAP ];
+    
+   clear_positions($heap);
+
+   $kernel->post( 'session', 'reset' );
+
+
+}
+
+sub event_change {
+    my ($kernel, $heap, $msg) = @_[ KERNEL, HEAP, ARG0 ];
+
+    Logger->log("Event being changed to: $msg");
+
+    $kernel->yield( 'status_msg', $msg );
+
+    clear_positions($heap);
+
+    $kernel->post( 'session', 'stats_reset' );
+
+}
+
+#sub change_proxy {
+#    my ($heap, $kernel, $postback) = @_[ HEAP, KERNEL, ARG0]; 
+#
+#    my $proxy = $postback->[0];
+#    Logger->log("gui thinks proxy is: $proxy");
+#    $kernel->post( 'session', 'proxy' => $proxy ); 
+#
+#}
+
+sub object_passing_test {
+    my ($heap, $self, $car) = @_[ HEAP, OBJECT, ARG0 ];
+    
+    Logger->log("driver: $car->{driver}");
+
+#    print Dumper($car);
+    foreach (@{$car->{changes}}) {
+	Logger->log("    c: $_");
+    }
+
+}
+
+
+# sub radio_command {
+#     my ($kernel, $postback) = @_[ KERNEL, ARG0]; 
+
+#     my $cmd = $postback->[0];
+#     my $arg;
+#     if (!defined $postback->[1]) {
+# 	$arg = '';
+#     } else {
+# 	$arg = $postback->[1];
+#     }
+#     Logger->log("gui cmd: $cmd  arg: $arg");
+#     Logger->log("PROBABLY SHOULD NT SEND COMMANDS FROM UI");
+#     #$kernel->post( 'radio', 'command' => $cmd => $arg ); 
+# }
+
+#sub write_bank {
+#    my ($kernel, $postback) = @_[ KERNEL, ARG0]; 
+
+#    my $yaml = $postback->[0];
+#    my $bank = $postback->[1];
+
+#    $kernel->post( 'radio', 'write_bank', $yaml, $bank );
+#}
+
+sub edit_car_freq {
+    my ($heap, $kernel, $postback) = @_[ HEAP, KERNEL, ARG0 ]; # ARG0 contains creation time
+                                              # values ("magic cookies")
+
+    my $pos = $postback->[0];
+    my %car = %{$heap->{cars}[$pos]};
+    Logger->log("edit freq for car num: $car{car}");
+
+    my $series = $kernel->call( 'session', 'get_series' );
+    my $year = (localtime)[5] + 1900;
+
+    Logger->log({level => 'warning', message => "NEED TO ADD YEAR TO QUERY"});
+    #my $car_matcher = (length($car{car})x'_' . '%';
+    my $car_info = $heap->{radio1}->get_info( "groups like \'%car%\' and groups like \'%$series%\' and (designator like \'$car{car}\' or designator like \'$car{car} %\')");
+    
+    my $edit_freq = $poe_main_window->Toplevel();
+    $edit_freq->title('Edit Frequency');
+#    $edit_freq->geometry('290x210');
+
+    my $top_frame = $edit_freq->Frame()->pack( -side => 'top' );
+    my $bottom_frame = $edit_freq->Frame()->pack( -side => 'top' );
+
+    my $text = $top_frame->TextUndo()->pack();
+    $bottom_frame->Button( -text => 'OK',
+        -command => sub { 
+		          my $txt = $text->get('1.0', 'end');
+			  if ($text->editModified() gt 1) {
+			      if (my $res = $heap->{radio1}->set_info( $txt )) {
+				  #print "invalid yaml: $res\n";
+                                  my $D = $edit_freq->Dialog(
+                                     -title => 'The Error',
+                                     -text  => $res,
+                                     -default_button => 'OK',
+                                     -buttons        => ['OK']
+                                   );
+				  my $choice = $D->Show;
+                                  return;
+                              }
+			  } else {
+			      Logger->log('text was NOT modified');
+                          }
+			  $edit_freq->destroy;
+                        }
+                              )->pack( -side => 'left' );
+    $bottom_frame->Button( -text => 'Cancel',
+               -command => sub { $edit_freq->destroy } )->pack( -side => 'left' );
+
+    $text->configure(-height      => 30,
+		 -background  => 'white',
+		 -foreground  => 'black',
+		 -width       => 40,
+		 -wrap        => 'word',
+		 -font        => 'terminus 14 bold'
+                     );
+    $text->insert("end", $car_info);
+}
+
+# TODO:  Delete this sub once life has been sucked out of it
+sub radio_control{ 
+    my ($heap, $kernel, $session) = @_[ HEAP, KERNEL, SESSION ];
+
+
+    # default to radio1
+    my $radio = 'radio1';
+    $heap->{$radio}->log_sink( 'update_log' );
+
+    my %opts = (
+                              -font => 'terminus 14 bold',
+	           );
+
+    my $radio_control = $poe_main_window->Toplevel();
+    $radio_control->title('Radio Control');
+    $radio_control->geometry('640x410');
+
+    my $cmd_frame = $radio_control->Frame();
+    my $btn_frame = $radio_control->Frame();
+
+    my $cmd_box = $cmd_frame->Entry( %opts, -width => 45 );
+
+    my $cmd_btn = $cmd_frame->Button( %opts, -text => 'Send',
+        -command => sub { 
+	                  my $cmd = $cmd_box->get();
+                          $heap->{$radio}->raw_cmd( $cmd );
+
+                        }
+                              );
+    
+    $heap->{log_window} = $radio_control->TextUndo( %opts );
+
+    my @cmd_choices = ( { -name => 'Sizeof Bank f',  -value => 'MWf' },
+			{ -name => 'Resize Bank f',  -value => 'MWf90' },
+			{ -name => 'Link scan bank f and g',  -value => 'BM fg' },
+			{ -name => 'Clear Bank Linking',  -value => 'BM%%' },
+			{ -name => 'Name Bank n',  -value => 'TBnxxxxxxxx' },	
+			{ -name => 'Delete Bank x',  -value => 'MQx%%' },
+                        { -name => 'LCD Contrast', -value => 'LB' },
+			{ -name => 'set scan bank a to racing (UHF)', -value => 'SEa SL0451.00000 SU0470.00000 AU1 ST025000 MD0 AT0 TTRacingFrqUHF'},
+			{ -name => 'set scan bank a to racing (VHF)', -value => 'SEb SL0150.00000 SU0174.00000 AU1 ST025000 MD0 AT0 TTRacingFrqVHF'},
+			{ -name => 'set search group 1', -value => 'GS1 AS1' },
+			{ -name => 'link search bank a and b', -value => 'BS ab' },
+			{ -name => 'auto store to bank J', -value => 'VT1' },
+			{ -name => 'SetOpening message (48 char max)', -value => 'OM2 ' },
+                       );
+
+    my $cmd_sel = $radio_control->JComboBox( %opts, 
+                                       -choices => \@cmd_choices ,
+				       -entrywidth => 45,
+#                                       -selectcommand => $session->postback('expand_radio_cmd'),
+					-selectcommand => sub {
+					    my ($self, $item) = @_;
+					    $cmd_box->delete( 0, 'end' );
+					    $cmd_box->insert( 0, $self->getSelectedValue() );
+					}
+
+                                       );
+
+
+    my $radio_frame = $radio_control->Frame()->pack(-side => "top");
+
+    my $radio_radio1 = $radio_frame->Radiobutton(-text => "radio1", 
+						 -value => "radio1",
+						 -variable => \$radio,
+						 -command => $session->postback( 'toggle_radio_sink' => 'radio1' )
+                                           )->pack(-side => "left");
+    my $radio_radio2 = $radio_frame->Radiobutton(-text => "radio2",
+						 -value => "radio2",
+						 -variable => \$radio,
+						 -command => $session->postback( 'toggle_radio_sink' => 'radio2' )
+                                             )->pack(-side => "left");
+
+
+    $cmd_sel->pack( -side => 'top' );
+    $cmd_frame->pack( -side => 'top' );
+    $cmd_box->pack( -side => 'left' );
+    $cmd_btn->pack( -side => 'left' );
+    $heap->{log_window}->pack( -side => 'top', -expand => 1, -fill => 'both'
+ );
+    $btn_frame->pack( -side => 'top' );
+
+    $btn_frame->Button( -text => 'OK',
+        -command => sub { 
+			       $heap->{log_window}->destroy();
+                               delete $heap->{log_window};
+			       $heap->{$radio}->log_sink();
+                               $radio_control->destroy;
+                        }
+                              )->pack( -side => 'left' );
+#    $btn_frame->Button( -text => 'Cancel',
+#               -command => sub { $radio_control->destroy } )->pack( -side => 'left' );
+
+
+    $heap->{log_window}->configure(-height      => 10,
+		 -background  => 'white',
+		 -foreground  => 'black',
+#		 -width       => 30,
+		 -wrap        => 'word',
+		 -font        => 'terminus 14 bold'
+                     );
+
+    
+
+}
+
+sub toggle_radio_sink {
+    my ($heap, $postback) = @_[ HEAP, ARG0 ];
+    
+    my $radio = $postback->[0];
+
+    if ($radio eq 'radio1') {
+	$heap->{radio2}->log_sink();
+        $heap->{radio1}->log_sink( 'update_log' );
+    } else {
+	$heap->{radio1}->log_sink();
+        $heap->{radio2}->log_sink( 'update_log' );
+    }
+}
+
+sub update_log {
+    my $heap = $_[ HEAP ];
+    if (exists $heap->{log_window}) {
+        $heap->{log_window}->insert("end", $_[ARG0]."\n");
+	$heap->{log_window}->SetCursor('end');
+
+	
+    }
+}
+
+sub get_car_info {
+    my ($cars, $compare) = @_;
+
+    my $info = $compare->{designator}; #default to what is in the db
+    my $scanned_car;
+    if ($info =~ /^(\d+).*/) { $scanned_car = $1 }
+
+    # for index of last item, try: $#$cars
+    for ( my $i=1; $i <= $#{$cars}; $i++ ) {
+	my $car = @$cars[$i];
+	if ($car->{car} eq $scanned_car) {
+            $info = "$car->{car} $car->{driver}";
+	    last;
+        }
+    }
+
+    return $info;
+}
+
+sub session_update {
+    my ($kernel, $heap, $result) = @_[ KERNEL, HEAP, ARG0 ];
+
+    my $color = 'lightgrey';
+    if ($result eq 'fail') { 
+	$color = 'red';
+	# only say something the first time failure occurs
+	if ($heap->{series_box}->cget('-background') ne $color) {
+            $kernel->post( 'booth' => 'say' => 
+                           'Connectivity has been lost' );
+	}
+    }
+	
+    $heap->{series_box}->configure(
+			           -background => $color,
+				);
+
+}
+
+
+sub weather_update {
+    my ($kernel, $heap, $update) = @_[ KERNEL, HEAP, ARG0 ];
+
+    $kernel->post( 'booth' => 'say' => $update );
+
+    Logger->log("weather: $update");
+}
+
+
+sub counter_update {
+    my ($kernel, $heap, $freq) = @_[ KERNEL, HEAP, ARG0 ];
+
+    my $controls = $heap->{counter_controls};
+
+    #Logger->log(Dumper($heap->{counter_controls}));
+
+    if ($controls->{mode} eq 'auto') {
+        #$kernel->post( 'post', "poe://Radio/radio/set_freq", $freq);
+	# TODO: Should remove radio1 hardcode
+        $heap->{radio1}->set_freq( $freq );
+    }
+
+    my $summary = $controls->{summary_grid};
+
+    my @sel = $summary->info('selection');
+
+    my $sel_freq;
+    if (exists $sel[0]) {
+        $sel_freq = $controls->{summary_grid}->itemCget($sel[0], 1, "-text");
+	#print "selected freq: $sel_freq\n";
+    }
+
+    $summary->delete('all');
+
+    my $freqs = $heap->{counter}->get_freqs;
+
+    my $i=0;
+    foreach (@$freqs) {
+	$summary->add($i);
+	$summary->itemCreate($i, 0, -text => $_->{num_hits});
+	$summary->itemCreate($i, 1, -text => $_->{frequency});
+	$summary->itemCreate($i, 2, -text => $_->{designator});
+
+	if ((defined $sel_freq) and 
+             ($sel_freq eq $_->{frequency})) { 
+            $summary->selectionSet( $i );
+	    
+	    if ($freq eq $sel_freq) {
+		#print "user is sitting on the freq that was hit\n";
+		$kernel->yield('counter_show_detail' => $i);
+	    }
+        }
+
+	$i++;
+    }
+
+
+}
+
+
+# I am doing something pretty nasty here as far as I can tell.
+# If show detail is called as a postback (user clicks on item), then
+# use ARG1 (postback arg.
+# If this routine is hit because currently selected item has just had
+# a hit, use ARG0
+sub counter_show_detail {
+    my ($kernel, $heap, $hack_arg, $postback) = @_[ KERNEL, HEAP, ARG0, ARG1 ];
+
+    my $itm;
+    my $caller;
+
+    # assume user clicked a freq
+    $itm = $postback->[0];
+    $caller = 'user';     
+
+    if (!defined $itm) {
+	# frequency counter spit out this frequency
+	$itm = $hack_arg;
+	$caller = 'counter';
+	
+    }
+
+    #Logger->log('in counter_show_detail');
+
+    my $controls = $heap->{counter_controls};
+
+    my $freq = $controls->{summary_grid}->itemCget($itm, 1, "-text");
+       
+    print "mode: $controls->{mode}  caller: $caller\n";
+    if (($controls->{mode} eq 'manual') and ($caller eq 'user')) {
+        #$kernel->post('IKC', 'post', "poe://Radio/radio/set_freq", $freq);
+	# TODO: Should remove radio1 hardcode
+        $heap->{radio1}->set_freq( $freq );
+    }
+
+    my $hits = $heap->{counter}->get_freq_detail( $freq );
+
+    my $detail = $controls->{detail_grid};
+    $detail->delete('all');
+
+    my $prev_time = time();
+    #print "current time: $prev_time\n";
+    my $i=0;
+    foreach (@$hits) {
+	$detail->add($i);
+
+	#my $time = timelocal(reverse split /[\: -]/ , $_->{time});
+	my $time = $_->{time};
+	my $interval = intervalstr($prev_time - $time);
+
+	$detail->itemCreate($i, 0, -text => $interval);
+	#$detail->itemCreate($i, 1, -text => $_->{lat});
+	#$detail->itemCreate($i, 2, -text => $_->{long});
+
+	$prev_time = $time;
+	
+	$i++;
+    }
+}
+
+sub intervalstr {
+    my $intr = shift;
+
+    my $res;
+    if ($intr == 0)  { return '< 1 sec' }
+    if ($intr < 60) { return "$intr sec" }
+    if ($intr <= 3600) { return sprintf('%s min %s sec', 
+					int($intr/60), $intr % 60 ) }
+    if ($intr <= 86400) { return sprintf('%s hour %s min',
+					 int($intr/3600), 
+                                         int($intr % 3600 / 60 + 0.5) ) }
+    return sprintf('%s day %s hour', int($intr/86400),
+                                     int($intr % 86400 / 3600 +0.5));
+}
+
+sub _ikc_server_init {
+    my ( $kernel, $heap, $self, $sender ) = @_[ KERNEL, HEAP, OBJECT, SENDER ];
+
+    POE::Component::IKC::Server->spawn( 
+        port=>5200, 
+        name=>'Radio',
+    );
+
+    # this session is to handle IKC messages only
+    POE::Session->create 
+          (inline_states =>
+	   {
+            _start   => sub { 
+		               Logger->log("starting IKC server for race_gui");
+                               $_[KERNEL]->alias_set( 'race_gui_ipc' );
+                               $_[KERNEL]->post( IKC => publish => 'race_gui_ipc', ['set_window'] );
+                               $_[KERNEL]->post( IKC => publish => 'race_gui_ipc', ['set_record'] );
+				    
+                            },
+            set_window => sub {  
+		               Logger->log("race_gui IKC set_window request");
+		               my $window = $_[ARG0];
+			       Logger->log("from outside world: $window");
+			       $_[KERNEL]->post('ui', 'set_window', $window);
+		               #$self->set_freq($_[ARG0]);
+	                    },
+
+            set_record => sub {  
+		               Logger->log("race_gui IKC set_record request");
+		               my $cmd = $_[ARG0];
+			       Logger->log("from outside world: $cmd");
+                               $_[KERNEL]->post( 'recorder', 'cease')
+
+			       #$_[KERNEL]->post('ui', 'set_window', $window);
+	                    },
+
+	   }
+
+
+    );
+
+
+
+}
+
+sub set_window {
+    my ( $heap, $window ) = @_[ HEAP, ARG0 ];
+
+
+    #Logger->log("about to set window to $window");
+
+    my @options = ('leader', 'record',  'scope', 'schedule', 'control', 'counter');
+    
+    if ((!grep(/$window/, @options)) and ($window ne 'next')) {
+	Logger->log("User wanted window |$window| but no such thing");
+	return;
+    }
+
+    if ($window eq 'next') {
+	for (my $i=0; $i <= $#options; $i++) {
+	    if ($heap->{current_window} eq $options[$i]) {
+		if ($i == $#options) {
+		    $window = $options[0]
+		} else {
+                    $window = $options[$i+1]
+	        }
+	    }
+        }
+
+    }
+
+    foreach my $a_window (@options) {
+
+	if ($window eq $a_window) {
+	    $heap->{frames}{$a_window}->pack (-side => 'top',
+                                            -fill => 'both', 
+                                            -expand => 1);
+	} else {
+  	    $heap->{frames}{$a_window}->packForget();
+        }
+    }
+
+    # this won't work.  may look at another way
+    #if ($window eq 'control') { 
+    #    $heap->{$radio}->log_sink( 'update_log' );
+    #} else {
+    #    $heap->{$radio}->log_sink();
+    #}
+
+
+
+    $heap->{current_window} = $window;
+}
+
+sub schedule_check {
+    my ( $heap, $kernel ) = @_[ HEAP, KERNEL ];
+
+    #Logger->log( 'waking up to check schedule' );
+
+    my $lead_time = $heap->{config}{scheduler}{lead_time};
+
+    my $now = DateTime->now->set_time_zone('America/Chicago'); # same as ( epoch => time() )
+
+    my $box = $heap->{schedule_controls}{schedule_box};
+    my $txt = $box->get('1.0', 'end');
+    $txt =~ s/\x{2013}//g;  # remove the unicode '-' in order to supress warning
+    my @items = split(/\n/, $txt);
+
+    foreach my $item (@items) {
+	#Logger->log("item: $item");
+	if ($item =~ /^(..?):(..?) (am|pm) (.*)/i) {
+	    #Logger->log("hour: $1  minute: $2  hm: $3   rest: $4");
+
+	    my $cur_time = $now;
+	    
+	    
+	    my $hour =  $1;
+	    # this ain't right
+	    if (uc($3) eq 'PM') { 
+	        if ($hour ne 12) {
+		    $hour = $hour + 12;
+                }
+            }
+	    my $event = DateTime->new(
+		year       => $cur_time->year,
+		month      => $cur_time->month,
+		day        => $cur_time->day,
+		hour       => $hour,
+		minute     => $2,
+		second     => $cur_time->second,
+		time_zone  => 'America/Chicago',
+            );
+	    my $delta = $event - $cur_time;
+	    #Logger->log(sprintf('    event: %d:%d | %s', $event->hour, $event->minute, $4));
+	    #Logger->log(sprintf(' cur_time: %d:%d', $cur_time->hour, $cur_time->minute));
+	    #Logger->log(sprintf('delta min: %d', $delta->in_units('minutes')));
+	  
+	    if ($delta->in_units('minutes') == $lead_time) {
+		Logger->log("in $lead_time minutes $4 will start");
+                $kernel->post( 'booth' => 'say' => 
+                               "in $lead_time minutes $4 will start" );
+            } elsif ($delta->in_units('minutes') == 0) {
+		Logger->log("event starting now is $4");
+                $kernel->post( 'booth' => 'say' => 
+                               "event starting now is $4" );
+            }
+
+	}
+
+    }
+
+    if ($box->editModified) {
+	$box->Save;
+	$box->editModified(0);
+	Logger->log("Schedule has been saved");
+    }
+
+    $kernel->delay( 'schedule_check' => 60 );
+}
+
+
+sub recording_active {
+    my ( $heap, $kernel, $info ) = @_[ HEAP, KERNEL, ARG0 ];
+
+    Logger->log('UI told recording is happening');
+    my $controls = $heap->{record_controls};
+    my $btn = $controls->{record_btn};
+
+    $controls->{log_box}->insert('end', $info."\n");
+    $controls->{log_box}->see('end');
+
+    $btn->bind('<ButtonPress>', sub {
+                                       $kernel->post( 'recorder', 'cease')
+	                             });
+
+    $heap->{recording_btn_text} = 'Stop';
+}
+
+sub recording_processing {
+    my ( $heap, $kernel, $info ) = @_[ HEAP, KERNEL, ARG0 ];
+
+    Logger->log('UI told processing is happening');
+    my $controls = $heap->{record_controls};
+    my $btn = $controls->{record_btn};
+
+    $controls->{log_box}->insert('end', $info."\n");
+    $controls->{log_box}->see('end');
+
+    $btn->bind('<ButtonPress>', sub {
+                                       $kernel->post( 'recorder', 'cease')
+	                             });
+
+    $heap->{recording_btn_text} = 'Stop';
+}
+
+sub recording_finalizing {
+    my ( $heap, $kernel, $info ) = @_[ HEAP, KERNEL, ARG0 ];
+
+    Logger->log('UI told finalizing is happening');
+    my $controls = $heap->{record_controls};
+    my $btn = $controls->{record_btn};
+
+    $controls->{log_box}->insert('end', $info."\n");
+    $controls->{log_box}->see('end');
+
+    $btn->bind('<ButtonPress>', sub {
+                                       $kernel->post( 'recorder', 'cease')
+	                             });
+
+    $heap->{recording_btn_text} = 'Stop';
+}
+
+
+
+
+sub recording_idle {
+    my ( $heap, $kernel, $info ) = @_[ HEAP, KERNEL, ARG0 ];
+
+    Logger->log('UI told recording is stopped');
+    my $controls = $heap->{record_controls};
+    my $btn = $controls->{record_btn};
+
+    $controls->{log_box}->insert('end', $info."\n");
+    $controls->{log_box}->see('end');
+
+    $btn->bind('<ButtonPress>', sub {
+
+                                       $kernel->post( 'recorder', 'record',
+					    {
+						Corner => $controls->{corner_box}->getSelectedValue(),
+					        Side => $controls->{side_box}->getSelectedValue(),
+						Series => $controls->{series_box}->getSelectedValue(),
+					        Event => $controls->{event_box}->getSelectedValue(),
+                                            } )
+	                             });
+
+
+
+    $heap->{recording_btn_text} = 'Record';
+}
+
+sub recording_error {
+    my ( $heap, $kernel, $info ) = @_[ HEAP, KERNEL, ARG0 ];
+
+    Logger->log('UI told about error');
+    my $controls = $heap->{record_controls};
+    my $btn = $controls->{record_btn};
+
+    $controls->{log_box}->insert('end', $info."\n");
+    $controls->{log_box}->see('end');
+}
+
+
+
+$poe_kernel->run();
+
