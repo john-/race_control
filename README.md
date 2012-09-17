@@ -1,12 +1,12 @@
 Introduction
 ------------
 
-race_control is for monitoring automobile racing leaderboards and for control of radio scanners.
+race_control is for monitoring some automobile racing leaderboards and for control of radio scanners.
 
 Features
 --------
 
-* Screen scrapes leaderboards for from automobile racing series.  This includes SCCA and ALMS.  See config for full list
+* Screen scrapes leaderboards for some automobile racing series.  This includes SCCA and ALMS.  See config for full list
     * Highlights and announces change in position, driver changes, top speed, best lap
     * Auto mode to cycle through configured leaderboards and stop on session activity
 * Controls AOR8200 radio scanners as well as provides user interface to display current frequency as well as human readable descriptor (from leaderboard if there is match otherwise from frequency database)
