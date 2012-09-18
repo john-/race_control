@@ -1,0 +1,42 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use Getopt::Long;
+
+use POE::Component::IKC::ClientLite;
+
+#my $window = 'next';
+my $window;
+my $record;
+
+my $result = GetOptions ("window=s"   => \$window,
+			 "record=s"   => \$record
+                       );
+
+
+my $poe=create_ikc_client(port=>5200);
+die 'Start race_control first ('.POE::Component::IKC::ClientLite::error().')' unless $poe;
+
+if ($window) {
+    print "window: $window\n";
+    $poe->post("race_gui_ipc/set_window", $window)
+	or die $poe->error;
+}
+
+if ($record) {
+    print "record: $record\n";
+    $poe->post("race_gui_ipc/set_record", $record)
+	or die $poe->error;
+}
+
+$poe->disconnect;
+    
+    # better way of getting a return value
+    #my $ret=$poe->post_respond("Session/other_event", $param)
+    #    or die $poe->error;
+
+    # make sure connectin is alive
+    #$poe->ping() 
+    #    or $poe->disconnect;

@@ -20,6 +20,7 @@ Features
 * Stores race weekend schedule and announces pending events (with configurable alert in advance of event)
 * Provides controls to record audio and flac encode/tag the recordings
 * When searching/scanning, stores gps lat/long
+* Interface to control a few functions via cli (change screens, stop recording, etc)
 
 Design
 ------
