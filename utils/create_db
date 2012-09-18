@@ -1,0 +1,11 @@
+#!/bin/sh
+
+# simple script to create initial database
+# execute from this utls directory
+# no data will be populated
+
+sqlite3 ../data/freqs.db '.read ../sql/freqs_schema.sql'
+sqlite3 ../data/freqs.db '.read ../sql/radiolog_schema.sql'
+sqlite3 ../data/freqs.db '.read ../sql/cntrlog_schema.sql'
+
+sqlite3 ../data/scope.db '.read ../sql/scopelog_schema.sql'

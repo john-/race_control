@@ -186,6 +186,9 @@ sub _radio_start {
     $self->{log_insert} = $self->{dbh}->prepare("insert into radiolog (frequency, source, groups) values (?, ?, ?)");
 
     # set up session to handle persistent storage of bandscope data
+    # using POE for this data as volume of data would benifet from
+    # non-blocking approach.  Should go back and change method
+    # for radiolog updates to be consistent
     my $scope_db = $self->{config}{database}{scope};
     POE::Component::EasyDBI->spawn(
         alias       => 'scope_storage',

@@ -35,6 +35,7 @@ Dependencies
 ------------
 
 * All sorts of perl modules
+* sqlite
 * alsa/aplay
 * Cepstral text to speech engine (http://www.cepstral.com/)
     * default configuration is Diane/Lawrence voices
