@@ -2,6 +2,9 @@ package POE::Component::Radio;
 
 use strict;
 use warnings;
+
+use FindBin qw($Bin);
+
 use POE;
 use POE::Wheel::ReadWrite;
 use Symbol qw(gensym);
@@ -179,7 +182,7 @@ sub _radio_start {
     my $dbargs = {AutoCommit => 1,
                   PrintError => 1};
 
-    my $db = $self->{config}{database}{name};
+    my $db = $Bin.'/'.$self->{config}{database}{name};
     # not sure what prep'd statements I need.  store the dbh for now.
     $self->{dbh} = DBI->connect("dbi:SQLite:dbname=$db","","",$dbargs);
 
@@ -189,7 +192,7 @@ sub _radio_start {
     # using POE for this data as volume of data would benifet from
     # non-blocking approach.  Should go back and change method
     # for radiolog updates to be consistent
-    my $scope_db = $self->{config}{database}{scope};
+    my $scope_db = $Bin.'/'.$self->{config}{database}{scope};
     POE::Component::EasyDBI->spawn(
         alias       => 'scope_storage',
         dsn         => "dbi:SQLite:dbname=$scope_db",

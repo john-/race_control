@@ -19,6 +19,7 @@ Features
 * Speaks (via TTS) changes in weather (temperature, wind direction and speed, etc)
 * Stores race weekend schedule and announces pending events (with configurable alert in advance of event)
 * Provides controls to record audio and flac encode/tag the recordings
+* When searching/scanning, stores gps lat/long
 
 Design
 ------
@@ -36,6 +37,7 @@ Dependencies
 
 * All sorts of perl modules
 * sqlite
+* gpsd
 * alsa/aplay
 * Cepstral text to speech engine (http://www.cepstral.com/)
     * default configuration is Diane/Lawrence voices
