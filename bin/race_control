@@ -6,6 +6,8 @@ use warnings;
 use FindBin qw($Bin);
 use lib "$Bin/../lib";
 
+use RaceControl::Utils;
+
 use Tk;
 #sub POE::Kernel::TRACE_DEFAULT  () { 1 }
 use POE;
@@ -106,6 +108,7 @@ sub start {
 
     $kernel->alias_set( 'ui' );
 
+    # the one location where we can't use the config to determine location
     my $config_file = "$Bin/../config/race_control.conf";
     unless (-e $config_file) {
 	die "There is no $config_file";
@@ -114,7 +117,8 @@ sub start {
                                     -Tie => 'Tie::IxHash');
     $heap->{config} = { $conf->getall };
 
-    POE::Component::Logger->spawn(ConfigFile => $Bin.'/'.$heap->{config}{race_gui}{log_config});
+    #POE::Component::Logger->spawn(ConfigFile => $Bin.'/'.$heap->{config}{race_gui}{log_config});
+    POE::Component::Logger->spawn(ConfigFile => RaceControl::Utils::abs_path($heap->{config}{race_gui}{log_config}));
     $POE::Component::Logger::DefaultLevel = 'debug';
 
 
@@ -840,7 +844,8 @@ sub create_schedule_frame {
     my %controls;
 
     my $font = $heap->{config}{scheduler}{font};
-    my $schedule = $Bin.'/'.$heap->{config}{scheduler}{schedule};
+    my $schedule = RaceControl::Utils::abs_path($heap->{config}{scheduler}{schedule});
+    #my $schedule = $Bin.'/'.$heap->{config}{scheduler}{schedule};
 
 
     my %opts = (
