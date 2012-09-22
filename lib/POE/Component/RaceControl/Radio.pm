@@ -183,6 +183,12 @@ sub _radio_start {
                   PrintError => 1};
 
     my $db = RaceControl::Utils::abs_path($self->{config}{database}{name});
+
+    if (!-e $db) {
+        Logger->log({level => 'error',message => "$db does not exist.  Either check config ({database}{name}) or create the db via utils/create_db"});
+	die;
+    }
+
     # not sure what prep'd statements I need.  store the dbh for now.
     $self->{dbh} = DBI->connect("dbi:SQLite:dbname=$db","","",$dbargs);
 

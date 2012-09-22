@@ -63,6 +63,12 @@ sub _cntr_start {
                   PrintError => 1};
 
     my $db = $self->{config}{database}{name};
+
+    if (!-e $db) {
+        Logger->log({level => 'error',message => "$db does not exist.  Either check config ({database}{name}) or create the db via utils/create_db"});
+	die;
+    }
+
     my $dbh = DBI->connect("dbi:SQLite:dbname=$db","","",$dbargs);
 
     $self->{log_insert} = $dbh->prepare("insert into cntrlog (frequency, source, lat, lon, alt) values (?, ?, ?, ?, ?)");
