@@ -6,6 +6,7 @@ use warnings;
 use FindBin qw($Bin);
 use lib "$Bin/../lib";
 
+use RaceControl::Utils;
 use RaceControl::Car;
 
 use POE;
@@ -186,7 +187,7 @@ sub set_series {
     # for 'http' method
     $self->{url} = $series_info{url};    
 
-    $self->{basedir} = $self->{config}{race_gui}{loader}{data_dir} . '/';
+    $self->{basedir} = RaceControl::Utils::abs_path($self->{config}{race_gui}{loader}{data_dir}) . '/';
 
     # for 'file' method
     $self->{file_root} = $self->{config}{race_gui}{loader}{file_root};
@@ -197,7 +198,7 @@ sub set_series {
     $self->{loader} = $series_info{loader}->new(Series => $series,
                                                 Config => $self->{config});
 
-    my $session_dump = $self->{basedir} . $series . '-' . $$ . '-' . $self->{session_id} . '.dump';
+    my $session_dump = $self->{basedir} . 'dumps/' . $series . '-' . $$ . '-' . $self->{session_id} . '.dump';
     Logger->log("dump file: $session_dump");
     # store the pieces and parts of the above file name in $self and ref in Car obj for file creation
     # I guess create file here and store reference so it is accesible by Car obj
@@ -272,12 +273,12 @@ sub got_response {
     my $response_string = $http_response->as_string();
 
     # write out file in case a problem needs to be reproduced
-    my $file_name = $self->{basedir} . $self->{series};
+    my $file_name = $self->{basedir} . 'leaderboards/' . $self->{series};
 
     $file_name .= '-' . $$ . '-' . $self->{session_id} . '-' .
                                         $self->{file_num} . '.html';
 
-    #print "debug file: $file_name\n";
+    #Logger->log({level => 'info', message => "debug file: $file_name"});
 
     my $debug_file = IO::File->new("> $file_name");
 
