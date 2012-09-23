@@ -4,6 +4,9 @@ use strict;
 use warnings;
 
 use FindBin qw($Bin);
+use lib "$Bin/../lib";
+
+use RaceControl::Utils;
 
 use Tk;
 use POE;
@@ -183,7 +186,7 @@ sub start {
     my $dbargs = {AutoCommit => 1,
                   PrintError => 1};
 
-    my $db = $heap->{config}{database}{name};
+    my $db = RaceControl::Utils::abs_path($heap->{config}{database}{name});
     my $dbh = DBI->connect("dbi:SQLite:dbname=$db","","",$dbargs);
     
     # put the db handle on the heap because later adhoc queries will be run
