@@ -21,7 +21,7 @@ POE::Component::Server::TCP->new(
 
   Started      => sub {
       my ($heap) = $_[HEAP];
-      print "Web server start\n";
+      print "Web server start. Ctrl-C to stop.\n";
   },
 
 
