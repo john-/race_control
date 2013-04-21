@@ -11,6 +11,9 @@ use RaceControl::Utils;
 use Tk;
 #sub POE::Kernel::TRACE_DEFAULT  () { 1 }
 use POE;
+use POE::Loop::Tk; # this is loaded implicitly but there is
+                   # vague message if module not installed.
+                   # maybe explicit load will make things clearer
 
 use POE::Component::RaceControl::Session;
 use POE::Component::RaceControl::Counter;
