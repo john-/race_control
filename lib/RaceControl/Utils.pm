@@ -5,7 +5,7 @@ use lib "$Bin/../lib";
 
 # used by *Loader.pm
 sub time_to_dec {
-    my ($self, $time) = @_;
+    my $time = shift;
 
     if ($time =~ /(\d*):(\d*\.\d*)/) {
         $time = $1*60 + $2;
