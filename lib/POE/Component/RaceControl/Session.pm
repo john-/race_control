@@ -221,6 +221,20 @@ sub kickit {
     given ($self->{retreival}) {
 	when /http/ { 
      	               Logger->log('requesting web page...');
+		       # INSERT UA HERE
+		       $kernel->call('ua' => 'shutdown');
+                       $self->{ua} = POE::Component::Client::HTTP->spawn
+                            ( Alias => 'ua',
+	                      Timeout => 15,
+			      #Agent => "user_agent Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.8.1.3) Gecko/20070421 Firefox/2.0.0.3",
+#	                      Agent => "Mozilla/5.0 (X11; Linux i686; rv:2.0.1) Gecko/20110520 Firefox/4.0.1",
+			      Agent => "Mozilla/5.0 (Linux; U; Android 2.3.4; en-us; ADR6400L 4G Build/GRJ22) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1",
+			      # need to research FollowRedirects more.  ALMS stopped working
+			      # with default so set it to 2 on a whim
+			      #FollowRedirects => 2,
+			      #Proxy => "http://localhost:8080",
+                       );
+
                        $self->{cur_request} = HTTP::Request->new('GET', $self->{url});
                        $kernel->post( ua => request => got_response 
                                                 => $self->{cur_request} );
@@ -497,7 +511,20 @@ sub crawler {
         }
 
         Logger->log("going to crawl: $_");
-	
+	# CREATE UA HERE
+        $kernel->call('ua' => 'shutdown');
+        $self->{ua} = POE::Component::Client::HTTP->spawn
+            ( Alias => 'ua',
+	      Timeout => 15,
+	      #Agent => "user_agent Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.8.1.3) Gecko/20070421 Firefox/2.0.0.3",
+#	  Agent => "Mozilla/5.0 (X11; Linux i686; rv:2.0.1) Gecko/20110520 Firefox/4.0.1",
+	      Agent => "Mozilla/5.0 (Linux; U; Android 2.3.4; en-us; ADR6400L 4G Build/GRJ22) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1",
+	      # need to research FollowRedirects more.  ALMS stopped working
+	      # with default so set it to 2 on a whim
+	      #FollowRedirects => 2,
+	      #Proxy => "http://localhost:8080",
+	);
+
         $self->{last_timing}{$_}{request}  = HTTP::Request->new('GET', $series_info{$_}{url});
 	$kernel->post( ua => request => crawl_response => $self->{last_timing}{$_}{request} => $_ );
     }
