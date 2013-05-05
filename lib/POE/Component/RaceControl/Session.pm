@@ -48,6 +48,7 @@ sub spawn {
 			     crawl_response => 'crawl_response',
 			     request_series_change => 'request_series_change',
 			     get_car_picture => 'car_image',
+			     create_user_agent => 'create_user_agent',
 			     # TODO: Iterate through leaderboards (during
 			     #       weekends) and look for activity
 			     #autoloader => 'autoloader',
@@ -140,7 +141,7 @@ sub get_series_list {
 }
 
 sub set_series {
-    my ($kernel, $self, $series) = @_[ KERNEL, OBJECT, ARG0 ];
+    my ($kernel, $self, $session, $series) = @_[ KERNEL, OBJECT, SESSION, ARG0 ];
 
     #Logger->log({level => 'info',message => "setting the series to: $series"});
 
@@ -163,6 +164,8 @@ sub set_series {
     }
 
     my %series_info = %{$self->{config}{session}{series}{$series}};
+
+    $kernel->call($session => 'create_user_agent');
 
     #Logger->log("series info: ".Dumper(%series_info));
     
@@ -202,6 +205,24 @@ sub _stop {
     print "stopping the session session\n";
 }
 
+sub create_user_agent {
+    my ($kernel, $self, $session) = @_[ KERNEL, OBJECT ];
+
+    $kernel->call('ua' => 'shutdown');  # I am not sure about this
+    $self->{ua} = POE::Component::Client::HTTP->spawn
+	( Alias => 'ua',
+	  Timeout => 15,
+	  #Agent => "user_agent Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.8.1.3) Gecko/20070421 Firefox/2.0.0.3",
+#	                      Agent => "Mozilla/5.0 (X11; Linux i686; rv:2.0.1) Gecko/20110520 Firefox/4.0.1",
+	  Agent => "Mozilla/5.0 (Linux; U; Android 2.3.4; en-us; ADR6400L 4G Build/GRJ22) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1",
+	  # need to research FollowRedirects more.  ALMS stopped working
+	  # with default so set it to 2 on a whim
+	  #FollowRedirects => 2,
+	  #Proxy => "http://localhost:8080",
+	);
+
+}
+
 sub kickit {
     my ($kernel, $self) = @_[ KERNEL, OBJECT ];
 
@@ -209,19 +230,6 @@ sub kickit {
     given ($self->{retreival}) {
 	when /http/ { 
      	               Logger->log('requesting web page...');
-		       # INSERT UA HERE
-		       $kernel->call('ua' => 'shutdown');
-                       $self->{ua} = POE::Component::Client::HTTP->spawn
-                            ( Alias => 'ua',
-	                      Timeout => 15,
-			      #Agent => "user_agent Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.8.1.3) Gecko/20070421 Firefox/2.0.0.3",
-#	                      Agent => "Mozilla/5.0 (X11; Linux i686; rv:2.0.1) Gecko/20110520 Firefox/4.0.1",
-			      Agent => "Mozilla/5.0 (Linux; U; Android 2.3.4; en-us; ADR6400L 4G Build/GRJ22) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1",
-			      # need to research FollowRedirects more.  ALMS stopped working
-			      # with default so set it to 2 on a whim
-			      #FollowRedirects => 2,
-			      #Proxy => "http://localhost:8080",
-                       );
 
                        $self->{cur_request} = HTTP::Request->new('GET', $self->{url});
                        $kernel->post( ua => request => got_response 
@@ -482,10 +490,13 @@ sub proxy {
 }
 
 sub crawler {
-    my ($kernel, $self) = @_[ KERNEL, OBJECT ];
+    my ($kernel, $self, $session) = @_[ KERNEL, OBJECT, SESSION ];
 
     # check to make sure it is the weekend
     # TODO
+
+    # Create a single ua for crawling multiple urls
+    $kernel->call($session => 'create_user_agent');
 
     # iterate through each series and set and retreive leaderboard
     my %series_info = %{$self->{config}{session}{series}};
@@ -493,25 +504,13 @@ sub crawler {
     #Logger->log(Dumper(%series_info));
 
     foreach (keys %series_info) {
-	if (exists $series_info{$_}{disable} and lc($series_info{$_}{disable}) eq 'yes') {
-	    Logger->log( { level => 'debug', message => "skipping $_ per config" } );
+	if ((exists $series_info{$_}{disable} and lc($series_info{$_}{disable}) eq 'yes') or
+           (exists $series_info{$_}{streaming} and lc($series_info{$_}{streaming}) eq 'yes')) {
+	    Logger->log( { level => 'debug', message => "skipping $_ per config (disabled or streaming)" } );
 	    next;
         }
 
         Logger->log("going to crawl: $_");
-	# CREATE UA HERE
-        $kernel->call('ua' => 'shutdown');
-        $self->{ua} = POE::Component::Client::HTTP->spawn
-            ( Alias => 'ua',
-	      Timeout => 15,
-	      #Agent => "user_agent Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.8.1.3) Gecko/20070421 Firefox/2.0.0.3",
-#	  Agent => "Mozilla/5.0 (X11; Linux i686; rv:2.0.1) Gecko/20110520 Firefox/4.0.1",
-	      Agent => "Mozilla/5.0 (Linux; U; Android 2.3.4; en-us; ADR6400L 4G Build/GRJ22) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1",
-	      # need to research FollowRedirects more.  ALMS stopped working
-	      # with default so set it to 2 on a whim
-	      #FollowRedirects => 2,
-	      #Proxy => "http://localhost:8080",
-	);
 
         $self->{last_timing}{$_}{request}  = HTTP::Request->new('GET', $series_info{$_}{url});
 	$kernel->post( ua => request => crawl_response => $self->{last_timing}{$_}{request} => $_ );
