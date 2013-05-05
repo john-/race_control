@@ -146,7 +146,6 @@ sub set_series {
     #Logger->log({level => 'info',message => "setting the series to: $series"});
 
     #$kernel->post( 'ui', 'change_series', $series );
-
     if ($series eq 'Auto') {
         $kernel->delay( 'kickit' => undef ); 
 	$kernel->yield('crawler');
@@ -165,7 +164,12 @@ sub set_series {
 
     my %series_info = %{$self->{config}{session}{series}{$series}};
 
-    $kernel->call($session => 'create_user_agent');
+    if (exists($series_info{streaming})) {
+        $self->{streaming} = lc($series_info{streaming})
+    } else {
+	$self->{streaming} = 'no'
+    }
+    $kernel->call($session => 'create_user_agent' => $self->{streaming});
 
     #Logger->log("series info: ".Dumper(%series_info));
     
@@ -206,26 +210,31 @@ sub _stop {
 }
 
 sub create_user_agent {
-    my ($kernel, $self, $session) = @_[ KERNEL, OBJECT ];
+    my ($kernel, $self, $streaming) = @_[ KERNEL, OBJECT, ARG0 ];
 
-    $kernel->call('ua' => 'shutdown');  # I am not sure about this
-    $self->{ua} = POE::Component::Client::HTTP->spawn
-	( Alias => 'ua',
+    my $user   = $self->{config}{session}{timeout};
+
+    my %opts = (
+	  Alias => 'ua',
 	  Timeout => 15,
-	  #Agent => "user_agent Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.8.1.3) Gecko/20070421 Firefox/2.0.0.3",
-#	                      Agent => "Mozilla/5.0 (X11; Linux i686; rv:2.0.1) Gecko/20110520 Firefox/4.0.1",
-	  Agent => "Mozilla/5.0 (Linux; U; Android 2.3.4; en-us; ADR6400L 4G Build/GRJ22) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1",
+	  Agent => $self->{config}{session}{useragent},
 	  # need to research FollowRedirects more.  ALMS stopped working
 	  # with default so set it to 2 on a whim
 	  #FollowRedirects => 2,
 	  #Proxy => "http://localhost:8080",
-	);
+    );
+    if ((defined $streaming) and ($streaming eq 'yes')) {
+        $opts{Streaming} = 40;
+    }
 
+    Logger->log({level => 'debug', message => "opts:".Dumper(%opts)});
+
+    $kernel->call('ua' => 'shutdown');  # I am not sure about this
+    $self->{ua} = POE::Component::Client::HTTP->spawn( %opts )
 }
 
 sub kickit {
     my ($kernel, $self) = @_[ KERNEL, OBJECT ];
-
 
     given ($self->{retreival}) {
 	when /http/ { 
@@ -273,28 +282,46 @@ sub file_request {
 
 sub got_response {
     my ( $kernel, $heap, $response_packet, $self ) = @_[ KERNEL, HEAP, ARG1, OBJECT ];
+    #my ($res, $data) = @{$_[ARG1]};
 
     Logger->log('...received web page');
 
     delete $self->{cur_request};
 
-    my $http_response = $response_packet->[0];
+    #my $http_response = $response_packet->[0];
 
-    my $response_string = $http_response->as_string();
-
+    #my $response_string = $http_response->as_string();
+ 
     # write out file in case a problem needs to be reproduced
     my $file_name = $self->{basedir} . 'leaderboards/' . $self->{series};
 
-    $file_name .= '-' . $$ . '-' . $self->{session_id} . '-' .
-                                        $self->{file_num} . '.html';
+    my $http_response;
+    my $response_string;
+    my $debug_file;
+    if ($self->{streaming} eq 'yes') {
+        #$http_response = $response_packet->[1];
+        ($http_response, $response_string) = @$response_packet;
+	$file_name .= '-' . $$ . '-' . $self->{session_id} . '.html';
+	if (!-e $file_name) {
+            Logger->log("file: $file_name");
+	}
+        $debug_file = IO::File->new(">> $file_name");
+	
+    } else {
+        $http_response = $response_packet->[0];
+        $response_string = $http_response->as_string();
+	$file_name .= '-' . $$ . '-' . $self->{session_id} . '-' .
+	    $self->{file_num} . '.html';
+        Logger->log("file: $file_name");
+	$debug_file = IO::File->new("> $file_name");
+    }
+
 
     #Logger->log({level => 'info', message => "debug file: $file_name"});
 
-    my $debug_file = IO::File->new("> $file_name");
 
     print $debug_file $response_string;
     #Logger->log("response_string: $response_string");
-    Logger->log("file: $file_name");
     $debug_file->close;
 
     $self->{file_num}++;
