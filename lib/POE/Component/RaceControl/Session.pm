@@ -28,18 +28,6 @@ sub spawn {
 
     my $self = bless \%opts, $package;
 
-    $self->{ua} = POE::Component::Client::HTTP->spawn
-        ( Alias => 'ua',
-	  Timeout => 15,
-	  #Agent => "user_agent Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.8.1.3) Gecko/20070421 Firefox/2.0.0.3",
-#	  Agent => "Mozilla/5.0 (X11; Linux i686; rv:2.0.1) Gecko/20110520 Firefox/4.0.1",
-	  Agent => "Mozilla/5.0 (Linux; U; Android 2.3.4; en-us; ADR6400L 4G Build/GRJ22) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1",
-	  # need to research FollowRedirects more.  ALMS stopped working
-	  # with default so set it to 2 on a whim
-	  #FollowRedirects => 2,
-          #Proxy => "http://localhost:8080",
-    );
-
     $self->{poe_session_id} = POE::Session->create (
 	  object_states => [
 		  $self => { _start     => '_start',
