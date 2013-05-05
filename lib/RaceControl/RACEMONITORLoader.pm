@@ -5,8 +5,7 @@ use FindBin qw($Bin);
 use lib "$Bin/../lib";
 use RaceControl::Utils;
 
-use POE::Filter::CSV;
-#use HTML::Clean;
+use HTML::Clean;
 #use HTML::TableExtract;
 use Data::Dumper;
 use POE::Component::Logger;
@@ -24,23 +23,41 @@ sub new {
     }
     @{$self->{fields}} = split / /, $fields_as_string;
     
-    $self->{filter} = POE::Filter::CSV->new();
-
-
     return $self;
 }
+
+
+my %flag_map = (
+    G  => 'Green',
+    Y  => 'Yellow',
+    R  => 'Red',
+    C  => 'Checkered',
+    U  => 'Unflagged',
+    );
+
+use constant EVENT => 0;
+use constant FLAG =>  5;
+use constant CONTROLMSG => 16;
+
+my @cleanups = (
+    [ driver     => qr{\(M\)}             ], # sometimes there is a "(M)"
+    [ driver     => qr{\(R\)}             ], # Don't care if they are a rookie
+    [ best_speed => qr{\+}                ], # sometimes there is a "+"
+    [ position   => qr{\+}                ],
+    [ status     => qr{\A\z},       'Run' ], # not all series track status
+    [ status     => qr{Active}i,    'Run' ],
+    [ status     => qr{In Pit}i,    'Pit' ],
+    [ status     => qr{Pace_Laps}i, 'Pace'],
+    );
 
 sub get_state {
     my ($self, $contents) = @_;
 
-    #$contents =~ s/\r//g;
+    $contents =~ s/\r//g;
     
-    # for streaming service like this one we can't reset session each time..but for now...
     my %session;
 
     foreach (split /\n/, $contents) {
-
-        Logger->log("line: $_");
 
  	if (/^ *\d+\+*\|/) {
 	    #print "position info: $_\n";
