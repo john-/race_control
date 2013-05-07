@@ -5,7 +5,8 @@ use FindBin qw($Bin);
 use lib "$Bin/../lib";
 use RaceControl::Utils;
 
-use HTML::Clean;
+use POE::Filter::CSV;
+#use HTML::Clean;
 #use HTML::TableExtract;
 use Data::Dumper;
 use POE::Component::Logger;
@@ -22,6 +23,8 @@ sub new {
         $fields_as_string = $self->{config}{session}{defaultfields};
     }
     @{$self->{fields}} = split / /, $fields_as_string;
+
+    $self->{leftover_contents} = '';   # from previous time called
     
     return $self;
 }
@@ -57,7 +60,32 @@ sub get_state {
     
     my %session;
 
+    if ($self->{leftover_contents}) {
+	#Logger->log("left overs: ".$self->{leftover_contents});
+    }
+
+    #$self->{leftover_contents} .= $contents;
+ 
+#    if ($contents !~ /\n(.+)\n$/) {
+#        Logger->log("this bit is incomplete on its own: $1");
+#    }
+#    Logger->log("CONTENTS: |$contents|");
+
+    if ($contents !~ /.+\n$/) {
+        Logger->log("line does NOT end with newline: $contents");
+    } else {
+	Logger->log("CONTENTS: |$contents|");
+    }
+
+
     foreach (split /\n/, $contents) {
+
+	#Logger->log("line: $_");
+
+	# if line doesn't end in return, store it as leftovers
+	#if (!/.+\n/) {
+	#    Logger->log("line does not end with newline: $_");
+        #}
 
  	if (/^ *\d+\+*\|/) {
 	    #print "position info: $_\n";

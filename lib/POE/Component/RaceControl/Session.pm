@@ -224,7 +224,7 @@ sub create_user_agent {
 	  #Proxy => "http://localhost:8080",
     );
     if ((defined $streaming) and ($streaming eq 'yes')) {
-        $opts{Streaming} = 40;
+        $opts{Streaming} = 80;
     }
 
     Logger->log({level => 'debug', message => "opts:".Dumper(%opts)});
