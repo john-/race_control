@@ -24,7 +24,9 @@ sub new {
     }
     @{$self->{fields}} = split / /, $fields_as_string;
 
-    $self->{session} = \();  # since we are streaming, perist session info
+    $self->{field} = \();  # Store car/drive info
+    $self->{order} = [];   # Running order
+    $self->{class} = ();   # Car class information
     $self->{carryover} = '';   # from previous time called
     
     return $self;
