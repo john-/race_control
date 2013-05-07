@@ -76,82 +76,8 @@ sub get_state {
 
     print Dumper($arrayref);
 
-    foreach (split /\n/, $contents) {
-
-	#Logger->log("line: $_");
-
-	# if line doesn't end in return, store it as leftovers
-	#if (!/.+\n/) {
-	#    Logger->log("line does not end with newline: $_");
-        #}
-
- 	if (/^ *\d+\+*\|/) {
-	    #print "position info: $_\n";
-	    
-	    # break up the input and put into hash
-
-	    my @values = split(/\|/);
-	    foreach (@values) { s/^\ *//; }; # remove leading spaces from field
-	    #my @values = map { s/^\ *//; } split(/\|/);
-	    #foreach (@values) { print "val: $_ "; }
-	    #print "\n";
-
-	    my %stats;
-	    @stats{@{$self->{fields}}} = @values;
 
 
-            # do some clean up / normalization
-
-	    foreach my $cleanup (@cleanups) {
-		    my ($key, $match, $replace) = @$cleanup;
-
-		    $stats{$key} =~ s/$match/$replace/g;
-		    #Logger->log("in $key replacing $match with $replace");
-		}
-
-	    # convert time from MM:SS to seconds
-	    $stats{last_lap} = RaceControl::Utils::time_to_dec($stats{last_lap});
-	    $stats{best_lap} = RaceControl::Utils::time_to_dec($stats{best_lap});
-
-	    $stats{id} = $stats{car};
-
-	    #Logger->log(Dumper(%stats));
-
-	    push @{$session{positions}}, \%stats;
-
-	} elsif (/^</) {
-            #print "header (LIVETIMING): $_\n";
-	    my @values = split(/\|/);
-
-            my $flag_code = $values[FLAG];
-            $session{flag} = exists $flag_map{$flag_code} ? $flag_map{$flag_code} : '';  # I stopped defaulting to Blank.  Trying a blank ('') instead.  Maybe not needed after I implemented the 200 return code hack in this file
-
-	    my $msg = $values[CONTROLMSG];
-            $msg =~ s/^>//;
-	    $msg =~ s/^.* : //;
-	    # If flag is in control_message,  ignore it.
-	    $session{control_message} = $msg unless $msg =~ /^\S+ flag/i;
-	    $session{event} = $values[EVENT];
-	    $session{event} =~ s/\<\!(.*)/$1/;
-
-	    #print Dumper(%session);
-	    
-        } else {
-	    #print "garbage: $_\n";
-        }
-    }
-
-    # hack to see if we got a valid response (200 code) but not valid
-    # data.  Seems like livetiming.net sometimes returns html instead
-    # of .PKT info
-    if ($session{event} eq '</html>') {
-	%session = ();
-	Logger->log('Got back bogus data from web site.  Clearing session response');
-    } else {
-        Logger->log((join '| ',
-                    map "$_: |$session{$_}", 
-                             qw/series event flag time control_message/).'|');
-    }
 
     return %session;
 }
