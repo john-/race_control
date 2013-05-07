@@ -319,7 +319,9 @@ sub got_response {
 
     #Logger->log({level => 'info', message => "debug file: $file_name"});
 
-
+    
+    # TODO:  when streaming it looks like at "end" $response_string can be empty
+    #        if that is correct, then don't try and print it.
     print $debug_file $response_string;
     #Logger->log("response_string: $response_string");
     $debug_file->close;
