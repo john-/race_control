@@ -24,7 +24,8 @@ sub new {
     }
     @{$self->{fields}} = split / /, $fields_as_string;
 
-    $self->{leftover_contents} = '';   # from previous time called
+    $self->{session} = \();  # since we are streaming, perist session info
+    $self->{carryover} = '';   # from previous time called
     
     return $self;
 }
@@ -58,25 +59,22 @@ sub get_state {
 
     $contents =~ s/\r//g;
     
-    my %session;
+    #my %session;
 
-    if ($self->{leftover_contents}) {
-	#Logger->log("left overs: ".$self->{leftover_contents});
-    }
+    $contents = $self->{carryover} . $contents;
 
-    #$self->{leftover_contents} .= $contents;
- 
-#    if ($contents !~ /\n(.+)\n$/) {
-#        Logger->log("this bit is incomplete on its own: $1");
-#    }
-#    Logger->log("CONTENTS: |$contents|");
-
-    if ($contents !~ /.+\n$/) {
-        Logger->log("line does NOT end with newline: $contents");
+    my @results = split(/\n/, $contents);
+    if (chomp($contents)) {
+        $self->{carryover} = '';
     } else {
-	Logger->log("CONTENTS: |$contents|");
+        $self->{carryover} = pop @results;  # the last item is partial CSV record
     }
 
+    my $filter = POE::Filter::CSV->new();
+
+    my $arrayref = $filter->get( [@results] );
+
+    print Dumper($arrayref);
 
     foreach (split /\n/, $contents) {
 
