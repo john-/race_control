@@ -78,7 +78,29 @@ sub get_state {
 	    $self->{field}{$row->[1]}{class}  = $self->{class}{$row->[3]};
 	    $self->{field}{$row->[1]}{driver} = "$row->[4] $row->[5]";
 	} elsif ($rec eq '$G') {  # order by position
-	    $self->{order}->[$row->[1]-1] = $row->[2];
+	    my $pos = $row->[1];
+	    my $car = $row->[2];
+	    #Logger->log("Checking against pos: $pos car: $car");
+	    #Logger->log(Dumper($self->{order}));
+	    if ((defined($self->{order}->[$pos-1])) and 
+                ($car ne $self->{order}->[$pos-1])) { # position changed
+
+	        splice(@{$self->{order}}, $pos-1, 0, $car); # insert
+		
+		my $last_idx = scalar(@{$self->{order}})-1;
+		Logger->log("last_idx: $last_idx");
+		for (my $idx = $last_idx; $idx >= 0; $idx--) {
+		    #Logger->log("looking at idx: $idx val: ".$self->{order}->[$idx]);
+		    if (($car eq $self->{order}->[$idx]) and
+			($pos-1 != $idx)) {
+			splice(@{$self->{order}}, $idx, 1);
+		    }
+		}
+	    } elsif (!defined($self->{order}->[$pos-1])) {   # it is first time so add car
+		Logger->log("adding car: ".Dumper($row)."\n");
+	        $self->{order}->[$row->[1]-1] = $row->[2];
+            }
+
 	    $self->{field}{$row->[2]}{last_lap} = 
 		             RaceControl::Utils::time_to_dec($row->[4]);
             #print "order: ".Dumper($self->{order})."\n";
@@ -100,7 +122,7 @@ sub get_state {
     foreach my $car (@{$self->{order}}) {
 	
 	$session{positions}[$cnt]{car} = $car;
-	if ($car) { # there was a time when there was a $G missing for a session
+	if (($car) or ($car eq '0')){ # there was a time when there was a $G missing for a session.   Also, handle car numbe "0"
 	    $session{positions}[$cnt]{id}  = $car;
         }
 	$session{positions}[$cnt]{position} = $cnt+1;

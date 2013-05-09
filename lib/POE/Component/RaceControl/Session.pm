@@ -423,16 +423,20 @@ sub refresh {
     # car updates
 
     foreach (@{$session{positions}}) {
-	my $id;
+
+	if (!exists($_->{id})) {
+	    next;
+	}
+
+        my $id;
+
 	# the check for id = '0' was brute force fix for when
 	# car number is 0.  For example: 
         # /library/data/leader_boards/IMSA-3473-1
 	# Driver is Donald Pickering
-        Logger->log(Dumper($_));
+        #Logger->log(Dumper($_));
 	if (($_->{id}) or ($_->{id} eq '0')) {
 	    $id = $_->{id};
-	} else {
-	    next;
 	}
 
 	unless (defined $self->{_cars}->{$id}) { 

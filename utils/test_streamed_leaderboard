@@ -4,7 +4,8 @@ use strict;
 
 # This is the file that will be streamed.  If changed to some other
 # type of file, you'll also need to fix the MIME type later on.
-sub STREAM_FILE () { "/home/pub/dev/race_control/archive/leaderboards/test_boards/blackburn-race.html" }
+sub STREAM_FILE () { "/home/pub/dev/race_control/archive/leaderboards/test_boards/oldoys-event.html" }
+#sub STREAM_FILE () { "/home/pub/dev/race_control/archive/leaderboards/test_boards/blackburn-race.html" }
 use Symbol qw(gensym);
 use HTTP::Response;
 
@@ -43,7 +44,7 @@ POE::Component::Server::TCP->new(
     my $bytes_read = sysread($heap->{file_to_stream}, my $buffer = '', 100);
     if ($bytes_read) {
       $heap->{client}->put($buffer);
-      sleep(0.5);
+      sleep(1);
     }
     else {
       delete $heap->{file_to_stream};
