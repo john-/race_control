@@ -353,6 +353,10 @@ sub refresh {
     #Logger->log(Dumper(%session));
     #Logger->log(Dumper($self->{loader}));
 
+    #Logger->log("SKIPPING REFRESH!");
+    #return;
+
+
     # if nothing there skip this iteration
     # For example, if loader gets error free response from
     # a leaderboard but there is invalid data in request.
@@ -381,7 +385,7 @@ sub refresh {
 
     my $time_idle = $self->{last_timing}{$series}{counter} * $self->{rate};
     my $timeout   = $self->{config}{session}{timeout};
-    if ($time_idle > $timeout) {
+    if (($time_idle > $timeout) and ($self->{streaming} eq 'no')) {
 	Logger->log('going into Auto mode');
 	#$self->{last_timing}{$series}{counter} = 0;
         #$kernel->yield( 'set_series' => 'Auto' );
@@ -424,6 +428,7 @@ sub refresh {
 	# car number is 0.  For example: 
         # /library/data/leader_boards/IMSA-3473-1
 	# Driver is Donald Pickering
+        Logger->log(Dumper($_));
 	if (($_->{id}) or ($_->{id} eq '0')) {
 	    $id = $_->{id};
 	} else {
@@ -451,7 +456,9 @@ sub refresh {
 
     }
 
-    $kernel->delay( 'kickit' => $self->{rate} );
+    if ($self->{streaming} eq 'no') {
+        $kernel->delay( 'kickit' => $self->{rate} );
+    }
 }
 
 sub status {

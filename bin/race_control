@@ -1567,12 +1567,13 @@ sub render_text {
     }
     $format{driver} = '%s';
 
-    if ($car{gap} =~ /^[.\d]+$/) {
-	$format{gap} = '/%0.2f';
-    } else {
-        $format{gap} = '/%s';  # gaps come in number of laps
+    if (exists($car{gap})) {
+	if ($car{gap} =~ /^[.\d]+$/) {
+	    $format{gap} = '/%0.2f';
+	} else {
+	    $format{gap} = '/%s';  # gaps come in number of laps
+	}
     }
-
 
     if (not $car{status} =~ /Run/) { 
 	$format{status} = '/%s';

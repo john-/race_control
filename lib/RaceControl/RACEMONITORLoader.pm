@@ -24,7 +24,7 @@ sub new {
     }
     @{$self->{fields}} = split / /, $fields_as_string;
 
-    $self->{field} = \();  # Store car/drive info
+    $self->{field} = ();  # Store car/drive info
     $self->{order} = [];   # Running order
     $self->{class} = ();   # Car class information
     $self->{carryover} = '';   # from previous time called
@@ -32,18 +32,6 @@ sub new {
     return $self;
 }
 
-
-my %flag_map = (
-    G  => 'Green',
-    Y  => 'Yellow',
-    R  => 'Red',
-    C  => 'Checkered',
-    U  => 'Unflagged',
-    );
-
-use constant EVENT => 0;
-use constant FLAG =>  5;
-use constant CONTROLMSG => 16;
 
 my @cleanups = (
     [ driver     => qr{\(M\)}             ], # sometimes there is a "(M)"
@@ -61,7 +49,7 @@ sub get_state {
 
     $contents =~ s/\r//g;
     
-    #my %session;
+    my %session;
 
     $contents = $self->{carryover} . $contents;
 
@@ -74,12 +62,63 @@ sub get_state {
 
     my $filter = POE::Filter::CSV->new();
 
-    my $arrayref = $filter->get( [@results] );
+    my $results_ref = $filter->get( [@results] );
 
-    print Dumper($arrayref);
+    #print Dumper($results_ref);
 
+    foreach $row (@$results_ref) {
+        #print Dumper($row);
+	#print "row[0]: $row->[0]\n";
+    
+	my $rec = $row->[0];
+	if ($rec eq '$C') { # car class
+	    $self->{class}{$row->[1]} = $row->[2];
+	    #print "class: " . $self->{class}{$row->[1]}."\n";
+	} elsif ($rec eq '$COMP') { # competitor
+	    $self->{field}{$row->[1]}{class}  = $self->{class}{$row->[3]};
+	    $self->{field}{$row->[1]}{driver} = "$row->[4] $row->[5]";
+	} elsif ($rec eq '$G') {  # order by position
+	    $self->{order}->[$row->[1]-1] = $row->[2];
+	    $self->{field}{$row->[2]}{last_lap} = 
+		             RaceControl::Utils::time_to_dec($row->[4]);
+            #print "order: ".Dumper($self->{order})."\n";
+	} elsif ($rec eq '$H') {  # order by time
+	    $self->{field}{$row->[2]}{bl_num}   = $row->[3];
+	    $self->{field}{$row->[2]}{best_lap} = 
+		              RaceControl::Utils::time_to_dec($row->[4]);
+	} elsif ($rec eq '$F') { # time ticker and flag info
+	    my $flag = $row->[5]; 
+	    $flag =~ s/\s+$//;
+            $session{flag} = $flag;
+        } elsif ($rec eq '$B') {
+	    $session{event} = $row->[2];
+        }
+    }
 
+    # create %session from tracked info
+    my $cnt = 0;
+    foreach my $car (@{$self->{order}}) {
+	
+	$session{positions}[$cnt]{car} = $car;
+	if ($car) { # there was a time when there was a $G missing for a session
+	    $session{positions}[$cnt]{id}  = $car;
+        }
+	$session{positions}[$cnt]{position} = $cnt+1;
+	$session{positions}[$cnt]{driver}   = $self->{field}{$car}{driver};
+        $session{positions}[$cnt]{last_lap} = $self->{field}{$car}{last_lap};
+	$session{positions}[$cnt]{best_lap} = $self->{field}{$car}{best_lap};
+	$session{positions}[$cnt]{bl_num}   = $self->{field}{$car}{bl_num};
+	$session{positions}[$cnt]{status}   = 'Run';  # maybe I will find this
 
+        $cnt++;
+    }
+
+    # hardcode some stuff for now
+    $session{control_message} = '';
+#    $session{flag}            = 'Checkered';
+#    $session{event}           = 'Test Event';
+
+    #print 'session: '.Dumper(%session)."\n";
 
     return %session;
 }

@@ -43,7 +43,7 @@ POE::Component::Server::TCP->new(
     my $bytes_read = sysread($heap->{file_to_stream}, my $buffer = '', 100);
     if ($bytes_read) {
       $heap->{client}->put($buffer);
-      sleep(1);
+      sleep(0.5);
     }
     else {
       delete $heap->{file_to_stream};
