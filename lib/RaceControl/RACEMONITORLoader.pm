@@ -60,11 +60,11 @@ sub get_state {
         $self->{carryover} = pop @results;  # the last item is partial CSV record
     }
 
-    my $filter = POE::Filter::CSV->new();
+    my $filter = POE::Filter::CSV->new( { binary => 1 }); # binary for crazy chars
 
     my $results_ref = $filter->get( [@results] );
 
-    #print Dumper($results_ref);
+    #Logger->log(Dumper($results_ref));
 
     foreach $row (@$results_ref) {
         #print Dumper($row);
@@ -80,15 +80,21 @@ sub get_state {
 	} elsif ($rec eq '$G') {  # order by position
 	    my $pos = $row->[1];
 	    my $car = $row->[2];
-	    #Logger->log("Checking against pos: $pos car: $car");
+	    my $laps = $row->[3];
+	    Logger->log("got a G record for car: $car  pos: $pos");
+	    if ($laps <= $self->{field}{$car}{laps}) {
+		#next;  # idea is that G records repeated once with lower lap num
+		        # this broke oldoys
+            }
+	    Logger->log("Checking against pos: $pos car: $car (laps: $laps, max laps ".$self->{field}{$car}{laps}.")");
 	    #Logger->log(Dumper($self->{order}));
+	    #Logger->log(Dumper($row));
 	    if ((defined($self->{order}->[$pos-1])) and 
                 ($car ne $self->{order}->[$pos-1])) { # position changed
 
 	        splice(@{$self->{order}}, $pos-1, 0, $car); # insert
 		
 		my $last_idx = scalar(@{$self->{order}})-1;
-		Logger->log("last_idx: $last_idx");
 		for (my $idx = $last_idx; $idx >= 0; $idx--) {
 		    #Logger->log("looking at idx: $idx val: ".$self->{order}->[$idx]);
 		    if (($car eq $self->{order}->[$idx]) and
@@ -98,11 +104,12 @@ sub get_state {
 		}
 	    } elsif (!defined($self->{order}->[$pos-1])) {   # it is first time so add car
 		Logger->log("adding car: ".Dumper($row)."\n");
-	        $self->{order}->[$row->[1]-1] = $row->[2];
+	        $self->{order}->[$pos-1] = $car;
             }
 
-	    $self->{field}{$row->[2]}{last_lap} = 
+	    $self->{field}{$car}{last_lap} = 
 		             RaceControl::Utils::time_to_dec($row->[4]);
+	    $self->{field}{$car}{laps} = $laps;
             #print "order: ".Dumper($self->{order})."\n";
 	} elsif ($rec eq '$H') {  # order by time
 	    $self->{field}{$row->[2]}{bl_num}   = $row->[3];
@@ -127,6 +134,7 @@ sub get_state {
         }
 	$session{positions}[$cnt]{position} = $cnt+1;
 	$session{positions}[$cnt]{driver}   = $self->{field}{$car}{driver};
+	$session{positions}[$cnt]{class}    = $self->{field}{$car}{class};
         $session{positions}[$cnt]{last_lap} = $self->{field}{$car}{last_lap};
 	$session{positions}[$cnt]{best_lap} = $self->{field}{$car}{best_lap};
 	$session{positions}[$cnt]{bl_num}   = $self->{field}{$car}{bl_num};
@@ -140,7 +148,7 @@ sub get_state {
 #    $session{flag}            = 'Checkered';
 #    $session{event}           = 'Test Event';
 
-    #print 'session: '.Dumper(%session)."\n";
+    #Logger->log('session: '.Dumper(%session));
 
     return %session;
 }
