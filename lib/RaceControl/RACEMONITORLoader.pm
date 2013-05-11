@@ -78,60 +78,63 @@ sub get_state {
 	    $self->{field}{$row->[1]}{class}  = $self->{class}{$row->[3]};
 	    $self->{field}{$row->[1]}{driver} = "$row->[4] $row->[5]";
 	} elsif ($rec eq '$G') {  # order by position
-	    my $pos = $row->[1];
-	    my $car = $row->[2];
+	    my $pos  = $row->[1];
+	    my $car  = $row->[2];
 	    my $laps = $row->[3];
 	    Logger->log("got a G record for car: $car  pos: $pos");
-	    if ($laps <= $self->{field}{$car}{laps}) {
-		#next;  # idea is that G records repeated once with lower lap num
-		        # this broke oldoys
-            }
-	    Logger->log("Checking against pos: $pos car: $car (laps: $laps, max laps ".$self->{field}{$car}{laps}.")");
-	    #Logger->log(Dumper($self->{order}));
-	    #Logger->log(Dumper($row));
-	    if ((defined($self->{order}->[$pos-1])) and 
-                ($car ne $self->{order}->[$pos-1])) { # position changed
 
-	        splice(@{$self->{order}}, $pos-1, 0, $car); # insert
-		
-		my $last_idx = scalar(@{$self->{order}})-1;
-		for (my $idx = $last_idx; $idx >= 0; $idx--) {
-		    #Logger->log("looking at idx: $idx val: ".$self->{order}->[$idx]);
-		    if (($car eq $self->{order}->[$idx]) and
-			($pos-1 != $idx)) {
-			splice(@{$self->{order}}, $idx, 1);
-		    }
+#	    Logger->log(Dumper($self->{order}));
+	    if ($self->{order}->[$pos-1] ne $car) { # car is not yet tracked or position change
+		#@{$self->{order} = grep(!/^$car$/, @{$self->{order}});
+		@{$self->{order}} = # need to catch undef and '0'
+                   grep { !defined($_) or !/^$car$/ } @{$self->{order}};
+
+		if (!defined($self->{order}->[$pos-1])) {
+		    $self->{order}->[$pos-1] = $car;
+		} else {
+	            splice(@{$self->{order}}, $pos-1, 0, $car); # insert
 		}
-	    } elsif (!defined($self->{order}->[$pos-1])) {   # it is first time so add car
-		Logger->log("adding car: ".Dumper($row)."\n");
-	        $self->{order}->[$pos-1] = $car;
-            }
-
+	    }
+	    
+	    if ((!defined($self->{field}{$car}{laps})) or
+	        ($self->{field}{$car}{laps} < $laps)) {
+                $self->{field}{$car}{laps} = $laps;
+	    }
+		
 	    $self->{field}{$car}{last_lap} = 
 		             RaceControl::Utils::time_to_dec($row->[4]);
-	    $self->{field}{$car}{laps} = $laps;
-            #print "order: ".Dumper($self->{order})."\n";
 	} elsif ($rec eq '$H') {  # order by time
-	    $self->{field}{$row->[2]}{bl_num}   = $row->[3];
-	    $self->{field}{$row->[2]}{best_lap} = 
-		              RaceControl::Utils::time_to_dec($row->[4]);
+	    my $pos      = $row->[1];
+	    my $car      = $row->[2];
+	    my $bl_num   = $row->[3];
+	    my $best_lap = $row->[4];
+	    $self->{field}{$car}{bl_num}  = $bl_num;
+	    $self->{field}{$car}{best_lap} = 
+		              RaceControl::Utils::time_to_dec($best_lap);
+	    Logger->log("got a H (best lap) record for car: $car lap: $bl_num  time: ".$self->{field}{$car}{best_lap});
 	} elsif ($rec eq '$F') { # time ticker and flag info
 	    my $flag = $row->[5]; 
 	    $flag =~ s/\s+$//;
             $session{flag} = $flag;
+	    Logger->log('got F rec');
         } elsif ($rec eq '$B') {
 	    $session{event} = $row->[2];
         }
     }
 
     # create %session from tracked info
-    my $cnt = 0;
-    foreach my $car (@{$self->{order}}) {
-	
-	$session{positions}[$cnt]{car} = $car;
-	if (($car) or ($car eq '0')){ # there was a time when there was a $G missing for a session.   Also, handle car numbe "0"
-	    $session{positions}[$cnt]{id}  = $car;
+    #Logger->log(Dumper($self->{order}));
+    for (my $cnt=0; $cnt < scalar(@{$self->{order}}); $cnt++) {
+
+	my $car = $self->{order}->[$cnt];
+
+	if ((!defined($car)) or
+	    (!defined($self->{field}{$car}{driver}))) {
+            next;
         }
+
+	$session{positions}[$cnt]{car} = $car;
+        $session{positions}[$cnt]{id}  = $car;
 	$session{positions}[$cnt]{position} = $cnt+1;
 	$session{positions}[$cnt]{driver}   = $self->{field}{$car}{driver};
 	$session{positions}[$cnt]{class}    = $self->{field}{$car}{class};
@@ -140,7 +143,6 @@ sub get_state {
 	$session{positions}[$cnt]{bl_num}   = $self->{field}{$car}{bl_num};
 	$session{positions}[$cnt]{status}   = 'Run';  # maybe I will find this
 
-        $cnt++;
     }
 
     # hardcode some stuff for now

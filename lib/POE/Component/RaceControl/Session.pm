@@ -284,7 +284,9 @@ sub got_response {
     my ( $kernel, $heap, $response_packet, $self ) = @_[ KERNEL, HEAP, ARG1, OBJECT ];
     #my ($res, $data) = @{$_[ARG1]};
 
-    Logger->log('...received web page');
+    if ($self->{streaming} eq 'no') {
+        Logger->log('...received web page');
+    }
 
     delete $self->{cur_request};
 
@@ -370,14 +372,18 @@ sub refresh {
     
     my $series = $self->{series};
     if ( !Compare(\%session, $self->{last_timing}{$series}{content}) ) {
-        Logger->log("content has changed for $series (in refresh)");
+	if ($self->{streaming} eq 'no') {
+            Logger->log("content has changed for $series (in refresh)");
+        }
         $self->{last_timing}{$series}{counter} = 0;
 	#Logger->log("ORIG: ".Dumper(%{$self->{last_timing}{$series}{content}}));
 	#Logger->log("NEW: ".Dumper(%session)); 
 
     } else {
         ++$self->{last_timing}{$series}{counter};
-	Logger->log("no change for $series (in refresh)  count: $self->{last_timing}{$series}{counter}");
+	if ($self->{streaming} eq 'no') {
+	    Logger->log("no change for $series (in refresh)  count: $self->{last_timing}{$series}{counter}");
+	}
     }
 
     # store for next pass through
