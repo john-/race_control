@@ -48,6 +48,15 @@ sub get_state {
     my ($self, $contents) = @_;
 
     $contents =~ s/\r//g;
+
+    foreach my $cleanup (@cleanups) {
+        my ($key, $match, $replace) = @$cleanup;
+
+       $contents =~ s/$match/$replace/g;
+        #Logger->log("in $key replacing $match with $replace");
+     }
+
+
     
     my %session;
 
