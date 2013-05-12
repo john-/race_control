@@ -4,7 +4,8 @@ use strict;
 
 # This is the file that will be streamed.  If changed to some other
 # type of file, you'll also need to fix the MIME type later on.
-sub STREAM_FILE () { "/home/pub/dev/race_control/archive/leaderboards/test_boards/oldoys-event.html" }
+sub STREAM_FILE () { "/home/pub/dev/race_control/archive/leaderboards/test_boards/crazy-names.html" }
+#sub STREAM_FILE () { "/home/pub/dev/race_control/archive/leaderboards/test_boards/oldoys-event.html" }
 #sub STREAM_FILE () { "/home/pub/dev/race_control/archive/leaderboards/test_boards/blackburn-race.html" }
 use Symbol qw(gensym);
 use HTTP::Response;

@@ -6,8 +6,6 @@ use lib "$Bin/../lib";
 use RaceControl::Utils;
 
 use POE::Filter::CSV;
-#use HTML::Clean;
-#use HTML::TableExtract;
 use Data::Dumper;
 use POE::Component::Logger;
 
@@ -24,10 +22,10 @@ sub new {
     }
     @{$self->{fields}} = split / /, $fields_as_string;
 
-    $self->{field} = ();  # Store car/drive info
-    $self->{order} = [];   # Running order
-    $self->{class} = ();   # Car class information
-    $self->{carryover} = '';   # from previous time called
+    $self->{field} = ();      # Store car/drive info
+    $self->{order} = [];      # Running order
+    $self->{class} = ();      # Car class information
+    $self->{carryover} = '';  # from previous time called
     
     return $self;
 }
@@ -49,14 +47,13 @@ sub get_state {
 
     $contents =~ s/\r//g;
 
-    foreach my $cleanup (@cleanups) {
-        my ($key, $match, $replace) = @$cleanup;
+#   this should be done at field level
+#    foreach my $cleanup (@cleanups) {
+#        my ($key, $match, $replace) = @$cleanup;
 
-       $contents =~ s/$match/$replace/g;
-        #Logger->log("in $key replacing $match with $replace");
-     }
-
-
+#       $contents =~ s/$match/$replace/g;
+#        #Logger->log("in $key replacing $match with $replace");
+#    }
     
     my %session;
 
@@ -75,6 +72,9 @@ sub get_state {
 
     #Logger->log(Dumper($results_ref));
 
+
+    #my $field = $self->{field};
+
     foreach $row (@$results_ref) {
         #print Dumper($row);
 	#print "row[0]: $row->[0]\n";
@@ -84,8 +84,17 @@ sub get_state {
 	    $self->{class}{$row->[1]} = $row->[2];
 	    #print "class: " . $self->{class}{$row->[1]}."\n";
 	} elsif ($rec eq '$COMP') { # competitor
-	    $self->{field}{$row->[1]}{class}  = $self->{class}{$row->[3]};
-	    $self->{field}{$row->[1]}{driver} = "$row->[4] $row->[5]";
+	    my $car      = $row->[1];
+	    my $class    = $row->[3];
+	    my $driver   = "$row->[4] $row->[5]";
+
+	    $driver =~ s/\s*\(N\)//;
+	    $driver =~ s/\s+jr\.*//i;   # get rid of Junior designator.  This should be done in UI.
+
+	    $field{$car}{class}  = $self->{class}{$class};
+	    $self->{field}{$car}{driver} = $driver;
+	    #$field{$car}{driver} = $driver;
+	    Logger->log("got a COMP record for driver: $driver in field: ".$self->{field}{$car}{driver});
 	} elsif ($rec eq '$G') {  # order by position
 	    my $pos  = $row->[1];
 	    my $car  = $row->[2];
@@ -99,7 +108,7 @@ sub get_state {
                    grep { !defined($_) or !/^$car$/ } @{$self->{order}};
 
 		if (!defined($self->{order}->[$pos-1])) {
-		    $self->{order}->[$pos-1] = $car;
+		    $self->{order}->[$pos-1] = $car;  # splice did not work in empty array
 		} else {
 	            splice(@{$self->{order}}, $pos-1, 0, $car); # insert
 		}
@@ -128,6 +137,8 @@ sub get_state {
 	    Logger->log('got F rec');
         } elsif ($rec eq '$B') {
 	    $session{event} = $row->[2];
+        } else {
+	    Logger->log("skip $row->[0]");	    
         }
     }
 
@@ -156,8 +167,6 @@ sub get_state {
 
     # hardcode some stuff for now
     $session{control_message} = '';
-#    $session{flag}            = 'Checkered';
-#    $session{event}           = 'Test Event';
 
     #Logger->log('session: '.Dumper(%session));
 
