@@ -73,7 +73,7 @@ sub get_state {
     #Logger->log(Dumper($results_ref));
 
 
-    #my $field = $self->{field};
+    my $field = $self->{field};
 
     foreach $row (@$results_ref) {
         #print Dumper($row);
@@ -91,9 +91,9 @@ sub get_state {
 	    $driver =~ s/\s*\(N\)//;
 	    $driver =~ s/\s+jr\.*//i;   # get rid of Junior designator.  This should be done in UI.
 
-	    $field{$car}{class}  = $self->{class}{$class};
-	    $self->{field}{$car}{driver} = $driver;
-	    #$field{$car}{driver} = $driver;
+	    #$self->{field}{$car}{driver} = $driver;
+	    $field->{$car}{class}  = $self->{class}{$class};
+	    $field->{$car}{driver} = $driver;
 	    Logger->log("got a COMP record for driver: $driver in field: ".$self->{field}{$car}{driver});
 	} elsif ($rec eq '$G') {  # order by position
 	    my $pos  = $row->[1];

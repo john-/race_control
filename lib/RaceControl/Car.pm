@@ -136,7 +136,6 @@ sub position {
 	#print "Lost: car $self->{car} was $self->{position} now $new\n";
     } else {
         push @{$self->{changes}}, 'position_improve';  # for future ui update
-	print "lgoic thinks that position has improved from ".$self->{position}." to $new\n";
     }
 }
 
