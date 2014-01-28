@@ -28,18 +28,6 @@ sub spawn {
 
     my $self = bless \%opts, $package;
 
-    $self->{ua} = POE::Component::Client::HTTP->spawn
-        ( Alias => 'ua',
-	  Timeout => 15,
-	  #Agent => "user_agent Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.8.1.3) Gecko/20070421 Firefox/2.0.0.3",
-#	  Agent => "Mozilla/5.0 (X11; Linux i686; rv:2.0.1) Gecko/20110520 Firefox/4.0.1",
-	  Agent => "Mozilla/5.0 (Linux; U; Android 2.3.4; en-us; ADR6400L 4G Build/GRJ22) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1",
-	  # need to research FollowRedirects more.  ALMS stopped working
-	  # with default so set it to 2 on a whim
-	  #FollowRedirects => 2,
-          #Proxy => "http://localhost:8080",
-    );
-
     $self->{poe_session_id} = POE::Session->create (
 	  object_states => [
 		  $self => { _start     => '_start',
@@ -60,6 +48,7 @@ sub spawn {
 			     crawl_response => 'crawl_response',
 			     request_series_change => 'request_series_change',
 			     get_car_picture => 'car_image',
+			     create_user_agent => 'create_user_agent',
 			     # TODO: Iterate through leaderboards (during
 			     #       weekends) and look for activity
 			     #autoloader => 'autoloader',
@@ -152,12 +141,11 @@ sub get_series_list {
 }
 
 sub set_series {
-    my ($kernel, $self, $series) = @_[ KERNEL, OBJECT, ARG0 ];
+    my ($kernel, $self, $session, $series) = @_[ KERNEL, OBJECT, SESSION, ARG0 ];
 
     #Logger->log({level => 'info',message => "setting the series to: $series"});
 
     #$kernel->post( 'ui', 'change_series', $series );
-
     if ($series eq 'Auto') {
         $kernel->delay( 'kickit' => undef ); 
 	$kernel->yield('crawler');
@@ -175,6 +163,13 @@ sub set_series {
     }
 
     my %series_info = %{$self->{config}{session}{series}{$series}};
+
+    if (exists($series_info{streaming})) {
+        $self->{streaming} = lc($series_info{streaming})
+    } else {
+	$self->{streaming} = 'no'
+    }
+    $kernel->call($session => 'create_user_agent' => $self->{streaming});
 
     #Logger->log("series info: ".Dumper(%series_info));
     
@@ -214,13 +209,37 @@ sub _stop {
     print "stopping the session session\n";
 }
 
+sub create_user_agent {
+    my ($kernel, $self, $streaming) = @_[ KERNEL, OBJECT, ARG0 ];
+
+    my $user   = $self->{config}{session}{timeout};
+
+    my %opts = (
+	  Alias => 'ua',
+	  Timeout => 15,
+	  Agent => $self->{config}{session}{useragent},
+	  # need to research FollowRedirects more.  ALMS stopped working
+	  # with default so set it to 2 on a whim
+	  #FollowRedirects => 2,
+	  #Proxy => "http://localhost:8080",
+    );
+    if ((defined $streaming) and ($streaming eq 'yes')) {
+        $opts{Streaming} = 80;
+    }
+
+    Logger->log({level => 'debug', message => "opts:".Dumper(%opts)});
+
+    $kernel->call('ua' => 'shutdown');  # I am not sure about this
+    $self->{ua} = POE::Component::Client::HTTP->spawn( %opts )
+}
+
 sub kickit {
     my ($kernel, $self) = @_[ KERNEL, OBJECT ];
-
 
     given ($self->{retreival}) {
 	when /http/ { 
      	               Logger->log('requesting web page...');
+
                        $self->{cur_request} = HTTP::Request->new('GET', $self->{url});
                        $kernel->post( ua => request => got_response 
                                                 => $self->{cur_request} );
@@ -263,28 +282,50 @@ sub file_request {
 
 sub got_response {
     my ( $kernel, $heap, $response_packet, $self ) = @_[ KERNEL, HEAP, ARG1, OBJECT ];
+    #my ($res, $data) = @{$_[ARG1]};
 
-    Logger->log('...received web page');
+    if ($self->{streaming} eq 'no') {
+        Logger->log('...received web page');
+    }
 
     delete $self->{cur_request};
 
-    my $http_response = $response_packet->[0];
+    #my $http_response = $response_packet->[0];
 
-    my $response_string = $http_response->as_string();
-
+    #my $response_string = $http_response->as_string();
+ 
     # write out file in case a problem needs to be reproduced
     my $file_name = $self->{basedir} . 'leaderboards/' . $self->{series};
 
-    $file_name .= '-' . $$ . '-' . $self->{session_id} . '-' .
-                                        $self->{file_num} . '.html';
+    my $http_response;
+    my $response_string;
+    my $debug_file;
+    if ($self->{streaming} eq 'yes') {
+        #$http_response = $response_packet->[1];
+        ($http_response, $response_string) = @$response_packet;
+	$file_name .= '-' . $$ . '-' . $self->{session_id} . '.html';
+	if (!-e $file_name) {
+            Logger->log("file: $file_name");
+	}
+        $debug_file = IO::File->new(">> $file_name");
+	
+    } else {
+        $http_response = $response_packet->[0];
+        $response_string = $http_response->as_string();
+	$file_name .= '-' . $$ . '-' . $self->{session_id} . '-' .
+	    $self->{file_num} . '.html';
+        Logger->log("file: $file_name");
+	$debug_file = IO::File->new("> $file_name");
+    }
+
 
     #Logger->log({level => 'info', message => "debug file: $file_name"});
 
-    my $debug_file = IO::File->new("> $file_name");
-
+    
+    # TODO:  when streaming it looks like at "end" $response_string can be empty
+    #        if that is correct, then don't try and print it.
     print $debug_file $response_string;
     #Logger->log("response_string: $response_string");
-    Logger->log("file: $file_name");
     $debug_file->close;
 
     $self->{file_num}++;
@@ -314,6 +355,10 @@ sub refresh {
     #Logger->log(Dumper(%session));
     #Logger->log(Dumper($self->{loader}));
 
+    #Logger->log("SKIPPING REFRESH!");
+    #return;
+
+
     # if nothing there skip this iteration
     # For example, if loader gets error free response from
     # a leaderboard but there is invalid data in request.
@@ -327,14 +372,18 @@ sub refresh {
     
     my $series = $self->{series};
     if ( !Compare(\%session, $self->{last_timing}{$series}{content}) ) {
-        Logger->log("content has changed for $series (in refresh)");
+	if ($self->{streaming} eq 'no') {
+            Logger->log("content has changed for $series (in refresh)");
+        }
         $self->{last_timing}{$series}{counter} = 0;
 	#Logger->log("ORIG: ".Dumper(%{$self->{last_timing}{$series}{content}}));
 	#Logger->log("NEW: ".Dumper(%session)); 
 
     } else {
         ++$self->{last_timing}{$series}{counter};
-	Logger->log("no change for $series (in refresh)  count: $self->{last_timing}{$series}{counter}");
+	if ($self->{streaming} eq 'no') {
+	    Logger->log("no change for $series (in refresh)  count: $self->{last_timing}{$series}{counter}");
+	}
     }
 
     # store for next pass through
@@ -342,7 +391,7 @@ sub refresh {
 
     my $time_idle = $self->{last_timing}{$series}{counter} * $self->{rate};
     my $timeout   = $self->{config}{session}{timeout};
-    if ($time_idle > $timeout) {
+    if (($time_idle > $timeout) and ($self->{streaming} eq 'no')) {
 	Logger->log('going into Auto mode');
 	#$self->{last_timing}{$series}{counter} = 0;
         #$kernel->yield( 'set_series' => 'Auto' );
@@ -380,15 +429,20 @@ sub refresh {
     # car updates
 
     foreach (@{$session{positions}}) {
-	my $id;
+
+	if (!exists($_->{id})) {
+	    next;
+	}
+
+        my $id;
+
 	# the check for id = '0' was brute force fix for when
 	# car number is 0.  For example: 
         # /library/data/leader_boards/IMSA-3473-1
 	# Driver is Donald Pickering
+        #Logger->log(Dumper($_));
 	if (($_->{id}) or ($_->{id} eq '0')) {
 	    $id = $_->{id};
-	} else {
-	    next;
 	}
 
 	unless (defined $self->{_cars}->{$id}) { 
@@ -412,7 +466,9 @@ sub refresh {
 
     }
 
-    $kernel->delay( 'kickit' => $self->{rate} );
+    if ($self->{streaming} eq 'no') {
+        $kernel->delay( 'kickit' => $self->{rate} );
+    }
 }
 
 sub status {
@@ -480,10 +536,13 @@ sub proxy {
 }
 
 sub crawler {
-    my ($kernel, $self) = @_[ KERNEL, OBJECT ];
+    my ($kernel, $self, $session) = @_[ KERNEL, OBJECT, SESSION ];
 
     # check to make sure it is the weekend
     # TODO
+
+    # Create a single ua for crawling multiple urls
+    $kernel->call($session => 'create_user_agent');
 
     # iterate through each series and set and retreive leaderboard
     my %series_info = %{$self->{config}{session}{series}};
@@ -491,13 +550,14 @@ sub crawler {
     #Logger->log(Dumper(%series_info));
 
     foreach (keys %series_info) {
-	if (exists $series_info{$_}{disable} and lc($series_info{$_}{disable}) eq 'yes') {
-	    Logger->log( { level => 'debug', message => "skipping $_ per config" } );
+	if ((exists $series_info{$_}{disable} and lc($series_info{$_}{disable}) eq 'yes') or
+           (exists $series_info{$_}{streaming} and lc($series_info{$_}{streaming}) eq 'yes')) {
+	    Logger->log( { level => 'debug', message => "skipping $_ per config (disabled or streaming)" } );
 	    next;
         }
 
         Logger->log("going to crawl: $_");
-	
+
         $self->{last_timing}{$_}{request}  = HTTP::Request->new('GET', $series_info{$_}{url});
 	$kernel->post( ua => request => crawl_response => $self->{last_timing}{$_}{request} => $_ );
     }
