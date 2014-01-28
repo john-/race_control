@@ -83,7 +83,7 @@ sub get_info_struct {
     #my $sql = 'select distinct freqs.frequency, freqs.designator from freqs,radiolog where ' . $qry;
     #my $sql = 'select * from freqs where ' . $qry;
 
-    Logger->log("qry: $qry");
+    Logger->log("qry get_info_struct: $qry");
     
     my @matches = @{ $self->{dbh}->selectall_arrayref( $qry, { Slice => {} } ) };
     return @matches;
@@ -535,6 +535,8 @@ sub get_freq_info {
     # TODO: Test case where more than one record is returned for a given freq
 
     Logger->log("freq in get_freq_info: $freq");
+
+    if ($freq eq 'INVALID') { return }
 
     # return info for a single occurance of the freq
     my $year = (localtime)[5] + 1900;

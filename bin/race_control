@@ -884,6 +884,9 @@ sub create_schedule_frame {
             Logger->log( {level   => 'error', 
 			  message => "Error opening schedule $file $!"} );
         }
+    } else {
+            $controls{schedule_box}->Load($file);
+            $controls{schedule_box}->editModified(0);
     }
 }
 
