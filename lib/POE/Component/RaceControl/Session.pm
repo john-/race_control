@@ -216,7 +216,7 @@ sub create_user_agent {
 
     my %opts = (
 	  Alias => 'ua',
-	  Timeout => 15,
+	  Timeout => $self->{config}{session}{http_timeout},
 	  Agent => $self->{config}{session}{useragent},
 	  # need to research FollowRedirects more.  ALMS stopped working
 	  # with default so set it to 2 on a whim
@@ -238,6 +238,15 @@ sub kickit {
 
     given ($self->{retreival}) {
 	when /http/ { 
+
+	               my $count = $kernel->call(
+                           'ua' => 'pending_requests_count');
+		       if ($count) {
+                           Logger->log({level => 'debug', 
+                         message => "number of requests in progress: $count"});
+		           return;
+                       }
+
      	               Logger->log('requesting web page...');
 
                        $self->{cur_request} = HTTP::Request->new('GET', $self->{url});
