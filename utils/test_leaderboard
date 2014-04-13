@@ -60,7 +60,7 @@ POE::Component::Server::TCP->new(
     my $filename = sprintf($file_base, $start_at);
     #print Dumper($heap->client_healp);
     print "going to dish out: $filename\n";
-    sleep 30;
+    sleep 8;
 
     ++$start_at;
 
