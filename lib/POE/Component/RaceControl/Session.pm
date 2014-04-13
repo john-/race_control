@@ -227,7 +227,7 @@ sub create_user_agent {
         $opts{Streaming} = 80;
     }
 
-    Logger->log({level => 'debug', message => "opts:".Dumper(%opts)});
+    #Logger->log({level => 'debug', message => "opts:".Dumper(%opts)});
 
     $kernel->call('ua' => 'shutdown');  # I am not sure about this
     $self->{ua} = POE::Component::Client::HTTP->spawn( %opts )
@@ -243,12 +243,13 @@ sub kickit {
                            'ua' => 'pending_requests_count');
 		       if ($count) {
                            Logger->log({level => 'debug', 
-                         message => "number of requests in progress: $count"});
+                         message => "It looks like rate was reduced with request in progress: $count"});
 		           return;
                        }
 
      	               Logger->log('requesting web page...');
 
+		       $self->{request_start} = time;
                        $self->{cur_request} = HTTP::Request->new('GET', $self->{url});
                        $kernel->post( ua => request => got_response 
                                                 => $self->{cur_request} );
@@ -294,7 +295,8 @@ sub got_response {
     #my ($res, $data) = @{$_[ARG1]};
 
     if ($self->{streaming} eq 'no') {
-        Logger->log('...received web page');
+	my $duration = time - $self->{request_start};
+        Logger->log(sprintf('...received web page (%.1f seconds)', $duration));
     }
 
     delete $self->{cur_request};
@@ -346,7 +348,7 @@ sub got_response {
 	Logger->log('Error downloading page.  Skipping refresh');
 	# if not a server error than assume connectivity lost
 	# yes, this is weak...probably need to add in other codes or redesign
-	if ($http_response->code() ne 500) {
+        if ($http_response->code() ne 500) {
             $kernel->post( 'ui', 'session_update', 'fail' );
         }
 	#$kernel->delay( 'kickit' => $self->{rate} );
