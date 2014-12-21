@@ -480,6 +480,8 @@ sub refresh {
     if ($self->{streaming} eq 'no') {
         $kernel->delay( 'kickit' => $self->{rate} );
     }
+    Logger->log("Leaving refresh: ".Dumper(%session)); 
+
 }
 
 sub status {
